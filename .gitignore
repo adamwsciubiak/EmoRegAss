@@ -1,0 +1,29 @@
+# Environment files and secrets
+.env
+credentials.json
+
+# Virtual environment folder
+venv/
+
+# Python cache files
+__pycache__/
+*.pyc
+*.pyo
+
+# Logs
+*.log
+
+# System files (OS-specific)
+.DS_Store
+Thumbs.db
+
+# VS Code settings (optional, if you want to keep your workspace clean)
+.vscode/
+
+# Temporary files or backups
+*.bak
+*.swp
+
+.qodo/
+
+tests/

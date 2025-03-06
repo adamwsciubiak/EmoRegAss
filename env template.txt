@@ -1,0 +1,18 @@
+# OpenAI API
+OPENAI_API_KEY=your_openai_api_key
+
+# Supabase
+SUPABASE_URL=your_supabase_url
+SUPABASE_KEY=your_supabase_key
+SUPABASE_TABLE=documents
+
+# Google Drive
+GOOGLE_DRIVE_FOLDER_ID=your_google_drive_folder_id
+GOOGLE_DRIVE_CREDENTIALS_PATH=credentials.json
+GOOGLE_DRIVE_TOKEN_PATH=token.pickle
+
+# Model Configuration
+EMOTION_MODEL=gpt-4o-mini
+RAG_MODEL=gpt-4o
+PLANNER_MODEL=gpt-4o
+RESPONSE_MODEL=gpt-4o

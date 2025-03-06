@@ -1,5 +1,10 @@
 Emotion Regulation Assistant
 
+
+*Please note that it's a prototype and although it has access to some mental health related publications, it's yet to be polished (pun intended).* **Do NOT share any sensitive information, do NOT use it for a serious advice.**
+        
+
+
 An AI-powered assistant that helps users regulate their emotions by providing personalized emotion regulation techniques based on their emotional state and personality traits.
 
 Features
@@ -13,14 +18,14 @@ Features
 Installation
 
 1. Clone the repository:
-   git clone https://github.com/yourusername/emotion-regulation-assistant.git
+   git clone https://github.com/adamwsciubiak/EmoRegAss.git
    cd emotion-regulation-assistant
 
 2. Install the required packages:
    pip install -r requirements.txt
 
-3. Create a .env file with your OpenAI API key:
-   OPENAI_API_KEY=your_api_key_here
+3. Create a .env file following env_template.txt
+
 
 Usage
 
@@ -31,22 +36,28 @@ Then open your browser and go to http://localhost:8501
 
 Project Structure
 
-- app.py: Streamlit web interface
 - src/: Source code
-  - main.py: Main application
   - components/: Individual components
     - emotion_recognition.py: Emotion recognition model
-    - rag_agent.py: Retrieval-Augmented Generation agent
-    - planner_verifier.py: Planner-Verifier agent
     - empathetic_response.py: Empathetic response generator
+    - planner_verifier.py: Planner-Verifier agent
+    - rag_agent.py: Retrieval-Augmented Generation agent
+  - pipeline/: RAG pipeline components
   - utils/: Utility functions
     - openai_utils.py: OpenAI API utilities
     - memory.py: Chat memory management
+    - google_drive_utils.py: Google Drive utilities (RAG)
+    - pdf_utilis.py: PDF utilities
     - vector_store.py: Vector store management
-  - config.py: Configuration settings
-- data/: Data files
-  - knowledge_base/: Emotion regulation techniques
-- tests/: Test files
+  - tests/: Test files: not published yet
+  - config.py: Configuration file
+  - main.py: Main application
+- app.py: Streamlit web interface
+- assistant_logs.log: Log file for assistant activities
+- README.md: Project description and installation instructions
+- requirements.txt: Python dependencies
+- run_pipeline.py: RAG pipeline
+- runtime.txt: Python config for streamlit
 
 How It Works
 
@@ -73,5 +84,3 @@ MIT
 
 
 
-venv\Scripts\activate
-streamlit run app.py

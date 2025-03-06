@@ -1,6 +1,8 @@
 # Environment files and secrets
 .env
 credentials.json
+notes.txt
+
 
 # Virtual environment folder
 venv/

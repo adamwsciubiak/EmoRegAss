@@ -63,12 +63,12 @@ class EmotionRegulationAssistant:
         Args:
             user_message (str): The user's message.
             personality_traits (Dict[str, int]): The user's personality traits
-                on a scale of 0-10.
+                on a scale of 1-10.
                 
         Returns:
             str: The assistant's response.
         """
-        logger.info(f"Processing message: {user_message[:50]}...")
+        logger.info(f"Processing message: {user_message[:200]}...")
         
         # Add user message to memory
         self.memory.add_message("user", user_message)
@@ -105,7 +105,7 @@ class EmotionRegulationAssistant:
             regulation_techniques=regulation_techniques,
             chat_history=chat_history
         )
-        logger.info(f"Generated response: {response[:50]}...")
+        logger.info(f"Generated response: {response[:200]}...")
         
         # Step 5: Verify the response quality
         verification = self.planner_verifier.verify_response(

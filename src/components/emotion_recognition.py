@@ -91,7 +91,7 @@ class EmotionRecognitionModel:
         Raises:
             Exception: If there's an error parsing the model response
         """
-        logger.info(f"Analyzing emotion in text: {text[:50]}...")
+        logger.info(f"Analyzing emotion in text: {text[:200]}...")
         
         # Create the chain
         chain = self.prompt | self.llm | self.output_parser

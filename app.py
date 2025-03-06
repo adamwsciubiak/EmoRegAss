@@ -12,6 +12,9 @@ import time
 from dotenv import load_dotenv
 import logging
 import traceback
+import matplotlib.pyplot as plt
+import numpy as np
+
 
 # Load environment variables
 load_dotenv()
@@ -103,6 +106,13 @@ if "processing_phase" not in st.session_state:
 if "user_message" not in st.session_state:
     st.session_state.user_message = None
 
+# Initialize emotion tracking history
+if "valence_history" not in st.session_state:
+    st.session_state.valence_history = []
+
+if "arousal_history" not in st.session_state:
+    st.session_state.arousal_history = []
+
 # Suggested prompts
 SUGGESTED_PROMPTS = [
     "I'm feeling anxious about an upcoming presentation.",
@@ -117,10 +127,8 @@ SUGGESTED_PROMPTS = [
 def handle_user_input():
     user_message = st.session_state.user_input
     if user_message:
-        # Store the message in session state instead of directly updating chat history
+        # Store the message in session state for processing
         st.session_state.user_message = user_message
-        # Clear the input box
-        st.session_state.user_input = ""
         # This forces streamlit to rerun the script
         st.rerun()
 
@@ -141,9 +149,62 @@ def toggle_logs():
 def reset_chat():
     st.session_state.chat_history = []
     st.session_state.emotion_analysis = None
+    # Clear emotion tracking history
+    st.session_state.valence_history = []
+    st.session_state.arousal_history = []
     # Clear logs when resetting chat
     clear_logs()
     st.session_state.latest_logs = ""
+
+# Function to create emotion trajectory plot
+def create_emotion_trajectory_plot():
+    if not st.session_state.valence_history:
+        return None
+    
+    valence = st.session_state.valence_history
+    arousal = st.session_state.arousal_history
+    
+    # If we only have one data point, duplicate it to avoid plot error
+    if len(valence) == 1:
+        # Use a slightly adjusted point to show direction
+        valence = [valence[0], valence[0]]
+        arousal = [arousal[0], arousal[0]]
+    
+    # Create figure and axis
+    fig, ax = plt.subplots(figsize=(6, 6))
+    
+    # Plot the points
+    ax.scatter(valence, arousal, color='royalblue', zorder=3)
+    
+    # Connect the points with a line to show trajectory
+    ax.plot(valence, arousal, linestyle='--', color='gray', zorder=2)
+    
+    # Annotate each point with its index (step number)
+    for i, (x, y) in enumerate(zip(valence, arousal)):
+        ax.annotate(f'{i+1}', (x, y), textcoords="offset points", xytext=(5, 5), ha='center', fontsize=9)
+    
+    # Add quadrant lines (neutral valence and arousal at 0.5)
+    ax.axhline(0, color='black', linewidth=1)
+    ax.axvline(0, color='black', linewidth=1)
+    
+    # Set axis limits and labels
+    ax.set_xlim(-1, 1)
+    ax.set_ylim(-1, 1)
+    ax.set_xlabel('Valence')
+    ax.set_ylabel('Arousal')
+    
+    # Optional: Add grid and background color for better visibility
+    ax.grid(True, linestyle='--', linewidth=0.5)
+    ax.set_facecolor('#f7f7f7')
+    
+    # Add quadrant labels
+    # ax.text(0.25, 0.75, "Distressed", ha='center', va='center', fontsize=9)
+    # ax.text(0.75, 0.75, "Excited", ha='center', va='center', fontsize=9)
+    # ax.text(0.25, 0.25, "Depressed", ha='center', va='center', fontsize=9)
+    # ax.text(0.75, 0.25, "Relaxed", ha='center', va='center', fontsize=9)
+    
+    plt.tight_layout()
+    return fig
 
 # Main app layout
 def main():
@@ -157,7 +218,6 @@ def main():
         # Mark as processing
         st.session_state.processing = True
         st.session_state.processing_phase = "Message processing... (might take a while in the current version, sorry! 😌)"
-        # In a real implementation, you would update these phases based on actual processing steps
         # Store the message for processing
         user_message = st.session_state.user_message
         # Clear the stored message
@@ -246,6 +306,13 @@ def main():
             
             st.write(f"Valence (Positive/Negative): {valence:.2f}")
             st.write(f"Arousal (Intensity): {arousal:.2f}")
+            
+            # Display emotion trajectory plot if we have data
+            if st.session_state.valence_history:
+                st.title("Emotion Trajectory")
+                fig = create_emotion_trajectory_plot()
+                if fig:
+                    st.pyplot(fig)
         
         # Reset and Toggle Logs buttons - conditionally shown based on processing state
         if st.session_state.processing:
@@ -261,7 +328,7 @@ def main():
                 toggle_logs()
     
     # Main chat interface
-    st.subheader("Share how you're feeling, and the assistant will help you understand and manage emotions through personalized techniques tuned with your emotional state and personality.")
+    st.subheader("Share how you're feeling, and the assistant will help you understand and manage emotions through personalized techniques tuned to your emotional state and personality.")
     
     # Show welcome message and description if no chat history
     if not st.session_state.chat_history:
@@ -299,12 +366,12 @@ def main():
                     st.rerun()
     
     # User input - disabled during processing
-    st.chat_input(
-        "Type your message here...",
-        key="user_input",
-        on_submit=handle_user_input,
-        disabled=st.session_state.processing
-    )
+    if not st.session_state.processing:
+        user_input = st.chat_input(
+            "Type your message here...",
+            key="user_input",
+            on_submit=handle_user_input
+        )
     
     # Display logs if show_logs is True
     if st.session_state.show_logs:
@@ -320,7 +387,7 @@ def process_message(user_message):
         # Process the message with the assistant
         start_time = time.time()
         
-        # Simulate different processing phases
+        # Processing phases
 
         response = st.session_state.assistant.process_message(
             user_message, 
@@ -337,12 +404,23 @@ def process_message(user_message):
         # Add assistant response to chat history
         st.session_state.chat_history.append({"role": "assistant", "content": response})
         
+        # Update emotion trajectory history
+        if st.session_state.emotion_analysis:
+            valence = st.session_state.emotion_analysis.get("valence", 0.5)
+            arousal = st.session_state.emotion_analysis.get("arousal", 0.5)
+            
+            # Add to history
+            st.session_state.valence_history.append(valence)
+            st.session_state.arousal_history.append(arousal)
+            
+            logger.info(f"Added to emotion history: valence={valence}, arousal={arousal}")
+            logger.info(f"Emotion history length: {len(st.session_state.valence_history)}")
+        
         # Log detailed information about the response
         logger.info(f"Response generated ({len(response)} chars): {response[:100]}...")
         if st.session_state.emotion_analysis:
             emotions_str = ", ".join([f"{k}: {v:.2f}" for k, v in 
                                    st.session_state.emotion_analysis.get("emotions", {}).items()])
-            logger.info(f"Detected emotions: {emotions_str}")
     except Exception as e:
         error_details = traceback.format_exc()
         logger.error(f"Error processing message: {e}\n{error_details}")

@@ -72,7 +72,7 @@ class RAGAgent:
             
             Consider:
             1. The specific emotions detected (e.g., anger, sadness, anxiety)
-            2. The intensity of the emotions (arousal)
+            2. The intensity of the emotions (arousal) and  whether the emotion is experienced as positive or negative (valence)
             3. The user's personality traits (OCEAN model)
             4. The context of the user's message
             
@@ -122,7 +122,7 @@ class RAGAgent:
         logger.debug("No code blocks found, returning original response")
         return response.strip()
     
-    def retrieve_relevant_documents(self, query: str, k: int = 5) -> List[str]:
+    def retrieve_relevant_documents(self, query: str, k: int = 3) -> List[str]:
         """
         Retrieve relevant documents from the vector store.
         
@@ -133,7 +133,7 @@ class RAGAgent:
         Returns:
             List[str]: A list of retrieved document contents.
         """
-        logger.info(f"Retrieving documents for query: {query[:50]}...")
+        logger.info(f"Retrieving documents for query: {query[:0]}...")
         
         docs = self.vector_store.similarity_search(query, k=k)
         return [doc.page_content for doc in docs]

@@ -9,6 +9,7 @@ langchain
 langchain-community
 langchain-openai
 langchain-text-splitters
+matplotlib
 openai
 pypdf
 python-dotenv

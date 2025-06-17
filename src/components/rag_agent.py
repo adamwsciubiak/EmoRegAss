@@ -8,12 +8,15 @@ and personality traits.
 
 import json
 import os
-import re
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 import logging
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import StrOutputParser
-from langchain_core.runnables import RunnablePassthrough
+from langchain_core.output_parsers import PydanticOutputParser
+# --- We will use RunnableParallel and itemgetter correctly this time ---
+from langchain_core.runnables import RunnableParallel, RunnablePassthrough
+from operator import itemgetter
+from langchain_core.documents import Document
+from pydantic import BaseModel, Field
 
 from src.utils.openai_utils import get_openai_chat_model
 from src.config import RAG_MODEL
@@ -21,6 +24,36 @@ from src.config import RAG_MODEL
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+# --- Pydantic models for structured output ---
+class Technique(BaseModel):
+    name: str = Field(description="The name of the emotion regulation technique.")
+    description: str = Field(description="A brief, one-sentence description of the technique.")
+    steps: List[str] = Field(description="A list of actionable steps to perform the technique.")
+    effectiveness: float = Field(ge=0.0, le=1.0, description="Estimated effectiveness for the user's situation (0-1).")
+    personality_match: float = Field(ge=0.0, le=1.0, description="How well this technique matches the user's personality (0-1).")
+    reasoning: str = Field(description="A brief explanation of why this technique is appropriate.")
+
+class RecommendedTechniques(BaseModel):
+    """A data model for a list of recommended emotion regulation techniques."""
+    techniques: List[Technique] = Field(description="A list of 3-5 recommended techniques.")
+
+
+# --- fallback techniques using the Pydantic model ---
+FALLBACK_TECHNIQUES = RecommendedTechniques(
+    techniques=[
+        Technique(name="Deep Breathing", description="A foundational self-regulation method that activates the parasympathetic nervous system, helping to reduce physiological arousal and restore a sense of calm.",  steps=["Inhale slowly and deeply through your nose for a count of 4.", "Gently hold your breath for a count of 4.", "Exhale fully and slowly through your mouth for a count of 6.", "Repeat the cycle 5–10 times, focusing on the rhythm of your breath."], effectiveness=0.5, personality_match=0.5, reasoning="Broadly effective across populations. Helps interrupt acute stress responses and fosters a sense of internal safety by regulating breathing patterns."),
+        Technique(name="5-4-3-2-1 Grounding", description="A sensory-based mindfulness practice designed to anchor attention to the present moment and reduce dissociative or anxious symptoms.", steps=["Identify 5 things you can see around you.", "Notice 4 things you can physically feel (e.g., your feet on the floor, the texture of clothing).", "Listen for 3 sounds in your environment.",   "Bring awareness to 2 distinct smells, or recall familiar ones.", "Notice 1 thing you can taste, or imagine a comforting taste if nothing is present."], effectiveness=0.5, personality_match=0.5, reasoning="Particularly helpful during anxiety or emotional flooding. Engaging multiple senses redirects attention away from intrusive thoughts.")
+   ]
+)
+
+def format_docs(docs: List[Document]) -> str:
+    """Helper function to format retrieved documents into a single string."""
+    return "\n\n---\n\n".join(doc.page_content for doc in docs)
+
+
+
 
 class RAGAgent:
     """
@@ -37,266 +70,132 @@ class RAGAgent:
         Args:
             vector_store: The vector store containing emotion regulation techniques.
             temperature (float, optional): The temperature setting for the model.
-                Defaults to 0.2.
+            Defaults to 0.2.
         """
-        self.vector_store = vector_store
+        self.retriever = vector_store.as_retriever(search_kwargs={"k": 5})
         self.llm = get_openai_chat_model(
             temperature=temperature, 
             model_name=os.getenv("RAG_MODEL", "gpt-4o")
         )
-        
-        self.format_instructions = """
-        You must respond with a JSON object with the following structure:
-        {
-            "techniques": [
-                {
-                    "name": "Technique Name",
-                    "description": "Brief description of the technique",
-                    "steps": ["Step 1", "Step 2", ...],
-                    "effectiveness": <float 0-1>,
-                    "personality_match": <float 0-1>,
-                    "reasoning": "Why this technique is appropriate"
-                },
-                ...
-            ]
-        }
-        
-        Include 3-5 techniques that are most appropriate for the user's emotional state and personality.
-        Respond ONLY with the JSON object, no other text. Do not include markdown formatting, code blocks, or backticks.
-        """
-        
-        self.retrieval_prompt = ChatPromptTemplate.from_messages([
-            ("system", """You are an expert emotion regulation assistant.
-            Based on the user's emotional state, personality traits, and message,
-            retrieve and rank the most appropriate emotion regulation techniques.
-            
-            Consider:
-            1. The specific emotions detected (e.g., anger, sadness, anxiety)
-            2. The intensity of the emotions (arousal) and  whether the emotion is experienced as positive or negative (valence)
-            3. The user's personality traits (OCEAN model)
-            4. The context of the user's message
-            
-            {format_instructions}
-            """),
-            ("user", """
-            User message: {user_message}
-            
-            Emotion analysis: {emotion_analysis}
-            
-            Personality traits (OCEAN model, scale 0-10):
-            - Openness: {openness}
-            - Conscientiousness: {conscientiousness}
-            - Extraversion: {extraversion}
-            - Agreeableness: {agreeableness}
-            - Neuroticism: {neuroticism}
-            
-            Retrieved knowledge:
-            {retrieved_documents}
-            """)
-        ])
-        
-        self.output_parser = StrOutputParser()
-    
-    def _clean_json_response(self, response: str) -> str:
-        """
-        Clean a response string to extract valid JSON.
-        
-        Args:
-            response (str): The response string that may contain markdown or other formatting.
-            
-        Returns:
-            str: A cleaned string containing only the JSON object.
-        """
-        # Log the raw response for debugging
-        logger.debug(f"Raw response before cleaning: {response}")
-        
-        # Remove markdown code blocks if present
-        json_pattern = r'```(?:json)?\s*([\s\S]*?)\s*```'
-        match = re.search(json_pattern, response)
-        if match:
-            cleaned = match.group(1).strip()
-            logger.debug(f"Extracted JSON from code block: {cleaned}")
-            return cleaned
-        
-        # If no code blocks, return the original response
-        logger.debug("No code blocks found, returning original response")
-        return response.strip()
-    
-    def retrieve_relevant_documents(self, query: str, k: int = 3) -> List[str]:
-        """
-        Retrieve relevant documents from the vector store.
-        
-        Args:
-            query (str): The query to search for.
-            k (int, optional): The number of documents to retrieve. Defaults to 5.
-            
-        Returns:
-            List[str]: A list of retrieved document contents.
-        """
-        logger.info(f"Retrieving documents for query: {query[:0]}...")
-        
-        docs = self.vector_store.similarity_search(query, k=k)
-        return [doc.page_content for doc in docs]
-    
+        self.output_parser = PydanticOutputParser(pydantic_object=RecommendedTechniques)
+
+        self.retrieval_prompt = ChatPromptTemplate.from_template(
+            """You are an expert emotion regulation assistant. Your task is to analyze the user's situation and the provided knowledge to recommend the MOST appropriate emotion regulation technique.
+
+You must explain your reasoning for each choice, linking it to the user's specific emotions and personality.
+
+CONTEXT:
+User's Message: {user_message}
+Emotion Analysis: {emotion_analysis_str}
+Personality Profile (OCEAN model, 0-10 scale): {personality_traits_str}
+
+RETRIEVED KNOWLEDGE:
+{context}
+
+Based on all the information, select and describe the best technique.
+
+{format_instructions}
+            """
+        )
+
+
+
+        # # --- declarative LCEL RAG chain ---
+        # self.rag_chain = (
+        #     {
+        #         "context": itemgetter("retrieval_query") | self.retriever | format_docs, # The retriever runs, its output is formatted
+
+        #         "user_message": itemgetter("user_message"),
+        #         "emotion_analysis": itemgetter("emotion_analysis"),
+        #         "personality_traits": itemgetter("personality_traits"),
+        #         "format_instructions": lambda x: self.output_parser.get_format_instructions()
+        #     }
+        #     | self.retrieval_prompt
+        #     | self.llm
+        #     | self.output_parser
+        # )
+
+
+
+        # # --- the RAG chain using the two-stage "augment then generate" pattern ---
+
+        # # This part of the chain is responsible for creating the retrieval query string.
+        # # It takes the full input dict and outputs just the query string.
+        # setup = RunnableParallel(
+        #     retrieval_query=lambda x: f"Techniques for a user feeling {', '.join([f'{e}: {s:.1f}' for e, s in x['emotion_analysis']['emotions'].items() if s > 0.3])}. User's situation: {x['user_message']}",
+        #     passthrough=RunnablePassthrough() # Pass the original inputs through
+        # )
+
+        # # This part of the chain takes the output from `setup` and adds the retrieved context.
+        # retrieval_chain = RunnableParallel(
+        #     context=itemgetter("retrieval_query") | self.retriever | format_docs,
+        #     # The original inputs are nested under the "passthrough" key
+        #     user_message=lambda x: x["passthrough"]["user_message"],
+        #     emotion_analysis=lambda x: json.dumps(x["passthrough"]["emotion_analysis"], indent=2),
+        #     personality_traits=lambda x: json.dumps(x["passthrough"]["personality_traits"], indent=2),
+        #     # This line was missing. It provides the instructions to the final prompt.
+        #     format_instructions=lambda _: self.output_parser.get_format_instructions(),
+        # )
+
+
+
+        # # This is the final chain that combines everything.
+        # self.rag_chain = (
+        #     setup 
+        #     | retrieval_chain 
+        #     | self.retrieval_prompt 
+        #     | self.llm 
+        #     | self.output_parser
+        # )
+
+
+
+        # --- THE FINAL, PARALLEL, AND CORRECT CHAIN ---
+
+        # 1. This small runnable creates the retrieval query string. It receives the
+        #    initial input dict and outputs only the string.
+        retrieval_query_creator = (
+            lambda x: f"Techniques for a user feeling {', '.join([f'{e}: {s:.1f}' for e, s in x['emotion_analysis']['emotions'].items() if s > 0.3])}. User's situation: {x['user_message']}"
+        )
+
+        # 2. This is the main parallel step. It takes the initial input dictionary and
+        #    creates all the variables needed for the final prompt.
+        setup_and_retrieval = RunnableParallel(
+            # For the 'context' key, we run a sub-chain:
+            # 1. Run the query creator
+            # 2. Pipe the resulting string to the retriever
+            # 3. Pipe the documents to the formatter
+            context=retrieval_query_creator | self.retriever | format_docs,
+
+            # For the other keys, we just pull them from the initial input.
+            user_message=itemgetter("user_message"),
+            emotion_analysis_str=lambda x: json.dumps(x["emotion_analysis"], indent=2),
+            personality_traits_str=lambda x: json.dumps(x["personality_traits"], indent=2),
+            format_instructions=lambda _: self.output_parser.get_format_instructions(),
+        )
+
+        # 3. The final chain is simple: setup -> prompt -> llm -> parse.
+        self.rag_chain = setup_and_retrieval | self.retrieval_prompt | self.llm | self.output_parser
+
     def get_regulation_techniques(
         self, 
         user_message: str, 
         emotion_analysis: Dict[str, Any],
         personality_traits: Dict[str, int]
     ) -> Dict[str, Any]:
-        """
-        Get appropriate emotion regulation techniques for the user.
-        
-        Args:
-            user_message (str): The user's message.
-            emotion_analysis (Dict[str, Any]): The emotion analysis results.
-            personality_traits (Dict[str, int]): The user's personality traits
-                on a scale of 0-10.
-                
-        Returns:
-            Dict[str, Any]: A dictionary containing recommended techniques.
-        """
-        logger.info("Retrieving emotion regulation techniques...")
-        
-        # Create a query from the user message and emotion analysis
-        emotions_str = ", ".join([f"{e}: {s:.2f}" for e, s in emotion_analysis["emotions"].items() if s > 0.3])
-        query = f"User feeling {emotions_str}. Message: {user_message}"
-        
-        # Retrieve relevant documents
-        retrieved_docs = self.retrieve_relevant_documents(query)
-        retrieved_text = "\n\n".join(retrieved_docs)
-        
-        # Create the chain
-        chain = self.retrieval_prompt | self.llm | self.output_parser
-        
-        # Run the chain
+        logger.info("Retrieving emotion regulation techniques using parallel RAG chain...")
+
         try:
-            response = chain.invoke({
+            # The invoke call is simple. The chain handles all internal data flow.
+            response = self.rag_chain.with_retry().invoke({
                 "user_message": user_message,
-                "emotion_analysis": json.dumps(emotion_analysis, indent=2),
-                "openness": personality_traits.get("openness", 5),
-                "conscientiousness": personality_traits.get("conscientiousness", 5),
-                "extraversion": personality_traits.get("extraversion", 5),
-                "agreeableness": personality_traits.get("agreeableness", 5),
-                "neuroticism": personality_traits.get("neuroticism", 5),
-                "retrieved_documents": retrieved_text,
-                "format_instructions": self.format_instructions
+                "emotion_analysis": emotion_analysis,
+                "personality_traits": personality_traits,
             })
-            
-            # Clean the response to extract valid JSON
-            cleaned_response = self._clean_json_response(response)
-            
-            # Parse the JSON response
-            try:
-                result = json.loads(cleaned_response)
-                logger.debug(f"Regulation techniques result: {result}")
-                return result
-            except json.JSONDecodeError as e:
-                logger.error(f"Error parsing regulation techniques response: {e}")
-                logger.error(f"Raw response: {response}")
-                logger.error(f"Cleaned response: {cleaned_response}")
-                
-                # Fallback techniques if parsing fails
-                fallback_techniques = {
-                    "techniques": [
-                        {
-                            "name": "Deep Breathing",
-                            "description": "A simple technique to calm the nervous system by taking slow, deep breaths.",
-                            "steps": [
-                                "Find a quiet place to sit or stand comfortably",
-                                "Inhale slowly through your nose for a count of 4",
-                                "Hold your breath for a count of 4",
-                                "Exhale slowly through your mouth for a count of 6",
-                                "Repeat for 5-10 cycles"
-                            ],
-                            "effectiveness": 0.8,
-                            "personality_match": 0.7,
-                            "reasoning": "Deep breathing is effective for most people and helps reduce physiological arousal."
-                        },
-                        {
-                            "name": "Progressive Muscle Relaxation",
-                            "description": "A technique to reduce physical tension by tensing and then relaxing muscle groups.",
-                            "steps": [
-                                "Find a comfortable position sitting or lying down",
-                                "Start with your feet and work up to your head",
-                                "Tense each muscle group for 5 seconds",
-                                "Release and relax for 10 seconds",
-                                "Notice the difference between tension and relaxation"
-                            ],
-                            "effectiveness": 0.7,
-                            "personality_match": 0.6,
-                            "reasoning": "Progressive muscle relaxation helps reduce physical tension associated with negative emotions."
-                        },
-                        {
-                            "name": "Mindfulness Meditation",
-                            "description": "A practice of focusing on the present moment without judgment.",
-                            "steps": [
-                                "Find a quiet place and sit comfortably",
-                                "Focus on your breath or a specific sensation",
-                                "When your mind wanders, gently bring it back",
-                                "Start with 5 minutes and gradually increase",
-                                "Practice regularly for best results"
-                            ],
-                            "effectiveness": 0.8,
-                            "personality_match": 0.5,
-                            "reasoning": "Mindfulness helps create distance from intense emotions and reduces reactivity."
-                        }
-                    ]
-                }
-                
-                logger.info("Using fallback techniques due to parsing error")
-                return fallback_techniques
-                
+            return response.model_dump()
+        
         except Exception as e:
-            logger.error(f"Error invoking retrieval chain: {e}")
-            
-            # Fallback techniques if chain invocation fails
-            fallback_techniques = {
-                "techniques": [
-                    {
-                        "name": "Deep Breathing",
-                        "description": "A simple technique to calm the nervous system by taking slow, deep breaths.",
-                        "steps": [
-                            "Find a quiet place to sit or stand comfortably",
-                            "Inhale slowly through your nose for a count of 4",
-                            "Hold your breath for a count of 4",
-                            "Exhale slowly through your mouth for a count of 6",
-                            "Repeat for 5-10 cycles"
-                        ],
-                        "effectiveness": 0.8,
-                        "personality_match": 0.7,
-                        "reasoning": "Deep breathing is effective for most people and helps reduce physiological arousal."
-                    },
-                    {
-                        "name": "Progressive Muscle Relaxation",
-                        "description": "A technique to reduce physical tension by tensing and then relaxing muscle groups.",
-                        "steps": [
-                            "Find a comfortable position sitting or lying down",
-                            "Start with your feet and work up to your head",
-                            "Tense each muscle group for 5 seconds",
-                            "Release and relax for 10 seconds",
-                            "Notice the difference between tension and relaxation"
-                        ],
-                        "effectiveness": 0.7,
-                        "personality_match": 0.6,
-                        "reasoning": "Progressive muscle relaxation helps reduce physical tension associated with negative emotions."
-                    },
-                    {
-                        "name": "Mindfulness Meditation",
-                        "description": "A practice of focusing on the present moment without judgment.",
-                        "steps": [
-                            "Find a quiet place and sit comfortably",
-                            "Focus on your breath or a specific sensation",
-                            "When your mind wanders, gently bring it back",
-                            "Start with 5 minutes and gradually increase",
-                            "Practice regularly for best results"
-                        ],
-                        "effectiveness": 0.8,
-                        "personality_match": 0.5,
-                        "reasoning": "Mindfulness helps create distance from intense emotions and reduces reactivity."
-                    }
-                ]
-            }
-            
-            logger.info("Using fallback techniques due to chain invocation error")
-            return fallback_techniques
+            logger.error(f"Error in RAG chain execution: {e}", exc_info=True)
+            logger.warning("Falling back to default techniques due to RAG chain error.")
+            return FALLBACK_TECHNIQUES.model_dump()
+    

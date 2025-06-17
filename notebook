@@ -1,0 +1,15 @@
+
+# Configure logging
+log_file = "assistant_logs.log"
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.StreamHandler(),              # Console logs (keep existing behavior)
+        logging.FileHandler(log_file)         # File logs (for Streamlit)
+    ]
+)
+logger = logging.getLogger(__name__)
+        self.memory.add_message("assistant", response)
+

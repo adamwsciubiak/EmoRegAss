@@ -15,6 +15,8 @@ import traceback
 import matplotlib.pyplot as plt
 import numpy as np
 
+from src.utils.plot_utils import create_emotion_trajectory_plot
+
 
 # Load environment variables
 load_dotenv()
@@ -60,8 +62,15 @@ def clear_logs():
         error_details = traceback.format_exc()
         logger.error(f"Error clearing log file: {e}\n{error_details}")
 
-# Import the Emotion Regulation Assistant
-from src.main import EmotionRegulationAssistant
+# --- REFACTOR: Import the new pipeline function and components ---
+from src.main import run_emotion_regulation_pipeline
+from src.components.emotion_recognition import EmotionRecognitionModel
+from src.components.rag_agent import RAGAgent
+from src.components.planner_verifier import PlannerVerifierAgent
+from src.components.empathetic_response import EmpatheticResponseAgent
+from src.utils.memory import ChatMemory
+from src.utils.vector_store import VectorStoreManager
+
 
 # Set page configuration
 st.set_page_config(
@@ -71,22 +80,39 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Initialize session state variables
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
 if "personality_traits" not in st.session_state:
     st.session_state.personality_traits = {
-        "openness": 5,
-        "conscientiousness": 5,
-        "extraversion": 5,
-        "agreeableness": 5,
-        "neuroticism": 5
+        "openness": 5, "conscientiousness": 5, "extraversion": 5,
+        "agreeableness": 5, "neuroticism": 5
     }
 
-if "assistant" not in st.session_state:
-    st.session_state.assistant = EmotionRegulationAssistant()
-    logger.info("Initialized EmotionRegulationAssistant instance")
+# Initialize chat memory
+if "chat_memory" not in st.session_state:
+    st.session_state.chat_memory = ChatMemory()
+    logger.info("Initialized ChatMemory.")
+
+
+if "emotion_recognition_model" not in st.session_state:
+    st.session_state.emotion_recognition_model = EmotionRecognitionModel()
+    logger.info("Initialized EmotionRecognitionModel.")
+
+if "vector_store_manager" not in st.session_state:
+    st.session_state.vector_store_manager = VectorStoreManager()
+    vector_store = st.session_state.vector_store_manager.load_or_create()
+    st.session_state.rag_agent = RAGAgent(vector_store=vector_store)
+    logger.info("Initialized VectorStoreManager and RAGAgent.")
+
+if "planner_verifier_agent" not in st.session_state:
+    st.session_state.planner_verifier_agent = PlannerVerifierAgent()
+    logger.info("Initialized PlannerVerifierAgent.")
+
+if "empathetic_response_agent" not in st.session_state:
+    st.session_state.empathetic_response_agent = EmpatheticResponseAgent()
+    logger.info("Initialized EmpatheticResponseAgent.")
+
 
 if "emotion_analysis" not in st.session_state:
     st.session_state.emotion_analysis = None
@@ -156,55 +182,6 @@ def reset_chat():
     clear_logs()
     st.session_state.latest_logs = ""
 
-# Function to create emotion trajectory plot
-def create_emotion_trajectory_plot():
-    if not st.session_state.valence_history:
-        return None
-    
-    valence = st.session_state.valence_history
-    arousal = st.session_state.arousal_history
-    
-    # If we only have one data point, duplicate it to avoid plot error
-    if len(valence) == 1:
-        # Use a slightly adjusted point to show direction
-        valence = [valence[0], valence[0]]
-        arousal = [arousal[0], arousal[0]]
-    
-    # Create figure and axis
-    fig, ax = plt.subplots(figsize=(6, 6))
-    
-    # Plot the points
-    ax.scatter(valence, arousal, color='royalblue', zorder=3)
-    
-    # Connect the points with a line to show trajectory
-    ax.plot(valence, arousal, linestyle='--', color='gray', zorder=2)
-    
-    # Annotate each point with its index (step number)
-    for i, (x, y) in enumerate(zip(valence, arousal)):
-        ax.annotate(f'{i+1}', (x, y), textcoords="offset points", xytext=(5, 5), ha='center', fontsize=9)
-    
-    # Add quadrant lines (neutral valence and arousal at 0.5)
-    ax.axhline(0, color='black', linewidth=1)
-    ax.axvline(0, color='black', linewidth=1)
-    
-    # Set axis limits and labels
-    ax.set_xlim(-1, 1)
-    ax.set_ylim(-1, 1)
-    ax.set_xlabel('Valence')
-    ax.set_ylabel('Arousal')
-    
-    # Optional: Add grid and background color for better visibility
-    ax.grid(True, linestyle='--', linewidth=0.5)
-    ax.set_facecolor('#f7f7f7')
-    
-    # Add quadrant labels
-    # ax.text(0.25, 0.75, "Distressed", ha='center', va='center', fontsize=9)
-    # ax.text(0.75, 0.75, "Excited", ha='center', va='center', fontsize=9)
-    # ax.text(0.25, 0.25, "Depressed", ha='center', va='center', fontsize=9)
-    # ax.text(0.75, 0.25, "Relaxed", ha='center', va='center', fontsize=9)
-    
-    plt.tight_layout()
-    return fig
 
 # Main app layout
 def main():
@@ -310,7 +287,11 @@ def main():
             # Display emotion trajectory plot if we have data
             if st.session_state.valence_history:
                 st.title("Emotion Trajectory")
-                fig = create_emotion_trajectory_plot()
+                fig = create_emotion_trajectory_plot(
+                    st.session_state.valence_history, 
+                    st.session_state.arousal_history
+                )
+                
                 if fig:
                     st.pyplot(fig)
         
@@ -381,49 +362,47 @@ def main():
 # Function to process a message
 def process_message(user_message):
     try:
-        # Update processing phase
         logger.info(f"Processing user message: {user_message[:200]}...")
-
-        # Process the message with the assistant
         start_time = time.time()
         
-        # Processing phases
-
-        response = st.session_state.assistant.process_message(
-            user_message, 
-            st.session_state.personality_traits
+        # Call the stateless pipeline function with all necessary components from session_state
+        response, emotion_analysis = run_emotion_regulation_pipeline(
+            user_message=user_message,
+            personality_traits=st.session_state.personality_traits,
+            chat_memory=st.session_state.chat_memory,
+            emotion_recognition_model=st.session_state.emotion_recognition_model,
+            rag_agent=st.session_state.rag_agent,
+            planner_verifier_agent=st.session_state.planner_verifier_agent,
+            empathetic_response_agent=st.session_state.empathetic_response_agent
         )
         
         processing_time = time.time() - start_time
-        logger.info(f"Message processed in {processing_time:.2f} seconds")
+        logger.info(f"Pipeline finished in {processing_time:.2f} seconds")
         
-        # Store the latest emotion analysis
-        st.session_state.emotion_analysis = st.session_state.assistant.last_emotion_analysis
-        logger.info(f"Emotion analysis updated: {st.session_state.emotion_analysis}")
+        # Store the latest emotion analysis from the return tuple
+        st.session_state.emotion_analysis = emotion_analysis
+        logger.info(f"Emotion analysis updated from pipeline: {st.session_state.emotion_analysis}")
         
-        # Add assistant response to chat history
+        # Add assistant response to chat history and memory
         st.session_state.chat_history.append({"role": "assistant", "content": response})
+        st.session_state.chat_memory.add_message("assistant", response)
         
         # Update emotion trajectory history
         if st.session_state.emotion_analysis:
-            valence = st.session_state.emotion_analysis.get("valence", 0.5)
-            arousal = st.session_state.emotion_analysis.get("arousal", 0.5)
+            valence = st.session_state.emotion_analysis.get("valence", 0)
+            arousal = st.session_state.emotion_analysis.get("arousal", 0)
             
-            # Add to history
             st.session_state.valence_history.append(valence)
             st.session_state.arousal_history.append(arousal)
             
             logger.info(f"Added to emotion history: valence={valence}, arousal={arousal}")
             logger.info(f"Emotion history length: {len(st.session_state.valence_history)}")
         
-        # Log detailed information about the response
-        logger.info(f"Response generated ({len(response)} chars): {response[:100]}...")
-        if st.session_state.emotion_analysis:
-            emotions_str = ", ".join([f"{k}: {v:.2f}" for k, v in 
-                                   st.session_state.emotion_analysis.get("emotions", {}).items()])
+        logger.info(f"Response added to history ({len(response)} chars): {response[:100]}...")
+
     except Exception as e:
         error_details = traceback.format_exc()
-        logger.error(f"Error processing message: {e}\n{error_details}")
+        logger.error(f"Error in pipeline execution: {e}\n{error_details}")
         st.session_state.chat_history.append({
             "role": "assistant", 
             "content": f"I'm sorry, there was an error processing your message: {str(e)}"
@@ -433,9 +412,8 @@ def process_message(user_message):
     st.session_state.processing = False
     st.session_state.processing_phase = "Initializing..."
     
-    # Update logs
     if st.session_state.show_logs:
-        st.session_state.latest_logs = read_logs(200)  # Show more log lines
+        st.session_state.latest_logs = read_logs(200)
 
 if __name__ == "__main__":
     main()

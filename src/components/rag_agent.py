@@ -99,58 +99,7 @@ Based on all the information, select and describe the best technique.
         )
 
 
-
-        # # --- declarative LCEL RAG chain ---
-        # self.rag_chain = (
-        #     {
-        #         "context": itemgetter("retrieval_query") | self.retriever | format_docs, # The retriever runs, its output is formatted
-
-        #         "user_message": itemgetter("user_message"),
-        #         "emotion_analysis": itemgetter("emotion_analysis"),
-        #         "personality_traits": itemgetter("personality_traits"),
-        #         "format_instructions": lambda x: self.output_parser.get_format_instructions()
-        #     }
-        #     | self.retrieval_prompt
-        #     | self.llm
-        #     | self.output_parser
-        # )
-
-
-
-        # # --- the RAG chain using the two-stage "augment then generate" pattern ---
-
-        # # This part of the chain is responsible for creating the retrieval query string.
-        # # It takes the full input dict and outputs just the query string.
-        # setup = RunnableParallel(
-        #     retrieval_query=lambda x: f"Techniques for a user feeling {', '.join([f'{e}: {s:.1f}' for e, s in x['emotion_analysis']['emotions'].items() if s > 0.3])}. User's situation: {x['user_message']}",
-        #     passthrough=RunnablePassthrough() # Pass the original inputs through
-        # )
-
-        # # This part of the chain takes the output from `setup` and adds the retrieved context.
-        # retrieval_chain = RunnableParallel(
-        #     context=itemgetter("retrieval_query") | self.retriever | format_docs,
-        #     # The original inputs are nested under the "passthrough" key
-        #     user_message=lambda x: x["passthrough"]["user_message"],
-        #     emotion_analysis=lambda x: json.dumps(x["passthrough"]["emotion_analysis"], indent=2),
-        #     personality_traits=lambda x: json.dumps(x["passthrough"]["personality_traits"], indent=2),
-        #     # This line was missing. It provides the instructions to the final prompt.
-        #     format_instructions=lambda _: self.output_parser.get_format_instructions(),
-        # )
-
-
-
-        # # This is the final chain that combines everything.
-        # self.rag_chain = (
-        #     setup 
-        #     | retrieval_chain 
-        #     | self.retrieval_prompt 
-        #     | self.llm 
-        #     | self.output_parser
-        # )
-
-
-
-        # --- THE FINAL, PARALLEL, AND CORRECT CHAIN ---
+        # --- THE PARALLEL CHAIN ---
 
         # 1. This small runnable creates the retrieval query string. It receives the
         #    initial input dict and outputs only the string.

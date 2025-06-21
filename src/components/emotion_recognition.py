@@ -6,7 +6,7 @@ extracting emotions, valence, and arousal values.
 """
 
 import os
-from typing import Dict
+from typing import Dict,  Any
 import logging
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import PydanticOutputParser
@@ -115,7 +115,7 @@ class EmotionRecognitionModel:
 
 
     
-    def analyze_emotion(self, text: str) -> Dict[str, any]:
+    def analyze_emotion(self, text: str) -> Dict[str, Any]:
         """
         Analyze the emotional content of the provided text.
         

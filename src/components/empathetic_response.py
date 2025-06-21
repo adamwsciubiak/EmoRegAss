@@ -8,12 +8,13 @@ and retrieved emotion regulation techniques.
 
 import json
 import os
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 import logging
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
 from src.utils.openai_utils import get_openai_chat_model
+from src.utils.format_utils import format_chat_history
 from src.config import RESPONSE_MODEL, RESPONSE_TEMPERATURE
 
 # Configure logging
@@ -43,48 +44,53 @@ class EmpatheticResponseAgent:
         )
         
         self.response_prompt = ChatPromptTemplate.from_messages([
-            ("system", """You are an empathetic emotion regulation assistant.
-            Your goal is to help users manage their emotions effectively.
-            
-            Generate a warm, empathetic response that:
-            1. Acknowledges the user's emotions
-            2. Validates their experience
-            3. Offers appropriate emotion regulation techniques
-            4. Encourages them to try the techniques
-            5. Ends with an open question to continue the conversation
-            
-            Adapt your tone and approach based on the user's personality traits.
-            For example:
-            - For users high in openness: Be creative and offer novel perspectives
-            - For users high in conscientiousness: Be structured and practical
-            - For users high in extraversion: Be energetic and social
-            - For users high in agreeableness: Be warm and supportive
-            - For users high in neuroticism: Be gentle and reassuring
-            
-            Follow the response plan provided.
+            ("system", """You are an expert, empathetic emotion regulation coach. Your primary goal is to execute a response plan perfectly, making the user feel heard, validated, and skillfully guided.
+
+            **Your Core Principles:**
+            1.  **Strictly Follow the Plan:** The 'Response Plan to Follow' is your script. You MUST adhere to its goal, steps, and considerations. The 'Regulation Techniques to Offer' is the content you will use to fill in the steps of that plan.
+            2.  **Implicit Adaptation:** You MUST adapt your tone and style based on the user's personality and emotions, but you must NEVER explicitly mention the traits or emotions you've detected. This adaptation is critical. For example:
+            - If personality indicates high neuroticism, your tone must be exceptionally gentle and reassuring.
+            - If personality indicates high conscientiousness, your language must be structured and logical.
+            This adaptation should be subtly woven into your word choice, NOT explicitly mentioned.
+            3.  **One Primary Technique:** Your main task is to select and present ONE primary technique from the provided list. This should be the most appropriate one for the user's current situation.
+
+            **Response Structure and Content:**
+            1.  **Acknowledge & Validate:** Begin by executing the first steps of the plan, which typically involve acknowledging and validating the user's feelings.
+            2.  **Introduce the Primary Technique:** Seamlessly introduce the single best technique from the provided list.
+            3.  **Explain the "Why":** Provide a clear, simple explanation of how the technique works and why it is effective for the kinds of feelings the user is experiencing.
+            4.  **Provide Detailed Step-by-Step Guidance:** Give clear, actionable, step-by-step instructions for the technique. Write them as if you are guiding the user through the exercise in real-time.
+            5.  **Offer Alternatives:** After detailing the primary technique, briefly name the other techniques from the list as clear alternatives. This gives the user agency.
+            6.  **Encourage & Inquire:** End the response with an open-ended question that asks the user for direction. This should give them an explicit choice on how to proceed. For example: "So, that's the [Primary Technique Name]. We could also explore [Alternative 1] or [Alternative 2]. Would you like a more detailed walkthrough of [Primary Technique Name], or would you prefer to hear about one of the other options first?"
+
+            **Handling Follow-up Questions:**
+            If the user asks for more details about a technique you have already described, DO NOT repeat the same information. Instead, provide a "deeper dive." This means offering additional details, metaphors, examples, or tips for common difficulties. Treat it as a chance to elaborate, not to repeat.
+
+            **Crucial Rule:** Your main focus is the detailed explanation of the ONE primary technique. The mention of alternatives should be a brief, single sentence to empower the user, not a list of other options.
             """),
-            ("user", """
-            User message: {user_message}
-            
-            Emotion analysis: {emotion_analysis}
-            
-            Personality traits (OCEAN model, scale 0-10):
-            - Openness: {openness}
-            - Conscientiousness: {conscientiousness}
-            - Extraversion: {extraversion}
-            - Agreeableness: {agreeableness}
-            - Neuroticism: {neuroticism}
-            
-            Response plan: {response_plan}
-            
-            Emotion regulation techniques: {regulation_techniques}
-            
-            Chat history:
-            {chat_history}
+
+
+
+                # The user prompt with the context is also slightly updated for clarity.
+                ("user", """CONTEXT FOR YOUR INTERNAL USE:
+            - User's Message: {user_message}
+            - Emotion Analysis: {emotion_analysis_str}
+            - Personality Profile: {personality_traits_str}
+            - Recent Chat History:
+            {chat_history_str}
+
+            YOUR SCRIPT AND CONTENT:
+            - **Response Plan to Follow (Your Script):** {response_plan_str}
+            - **Regulation Techniques to Offer (Your Content - CHOOSE ONE as primary):** {regulation_techniques_str}
             """)
         ])
+
+
+
+
         
         self.output_parser = StrOutputParser()
+        # --- Response chain ---
+        self.response_chain = self.response_prompt | self.llm | self.output_parser
     
     def generate_response(
         self, 
@@ -123,19 +129,21 @@ class EmpatheticResponseAgent:
         # Create the chain
         chain = self.response_prompt | self.llm | self.output_parser
         
-        # Run the chain
-        response = chain.invoke({
-            "user_message": user_message,
-            "emotion_analysis": json.dumps(emotion_analysis, indent=2),
-            "openness": personality_traits.get("openness", 5),
-            "conscientiousness": personality_traits.get("conscientiousness", 5),
-            "extraversion": personality_traits.get("extraversion", 5),
-            "agreeableness": personality_traits.get("agreeableness", 5),
-            "neuroticism": personality_traits.get("neuroticism", 5),
-            "response_plan": json.dumps(response_plan, indent=2),
-            "regulation_techniques": json.dumps(regulation_techniques, indent=2),
-            "chat_history": formatted_history
-        })
+        try:
+            # Populate the prompt template.
+            response = self.response_chain.invoke({
+                "user_message": user_message,
+                # Convert complex objects to JSON strings for the prompt
+                "emotion_analysis_str": json.dumps(emotion_analysis, indent=2),
+                "personality_traits_str": json.dumps(personality_traits, indent=2),
+                "response_plan_str": json.dumps(response_plan, indent=2),
+                "regulation_techniques_str": json.dumps(regulation_techniques, indent=2),
+                "chat_history_str": format_chat_history(chat_history[-5:]) # Use shared utility
+            })
+
+            logger.debug(f"Generated response: {response[:100]}...")
+            return response
         
-        logger.debug(f"Generated response: {response[:100]}...")
-        return response
+        except Exception as e:
+            logger.error(f"Error in response generation chain: {e}", exc_info=True)
+            return "I'm very sorry, but I encountered an error while trying to formulate a response. Could you perhaps rephrase your last message?"

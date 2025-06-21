@@ -8,17 +8,55 @@ retrieval and verifies the quality of responses.
 import json
 import os
 import re
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 import logging
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import StrOutputParser
+from langchain_core.output_parsers import PydanticOutputParser
+from pydantic import BaseModel, Field
 
 from src.utils.openai_utils import get_openai_chat_model
+from src.utils.format_utils import format_chat_history
 from src.config import PLANNER_MODEL
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+# --- Pydantic models for structured output ---
+class ResponsePlan(BaseModel):
+    goal: str = Field(description="The main goal of the response.")
+    steps: List[str] = Field(description="A list of concrete steps the final response should take.")
+    considerations: List[str] = Field(description="Important factors to consider.")
+
+class PlanOutput(BaseModel):
+    plan: ResponsePlan
+
+class Verification(BaseModel):
+    quality_score: float = Field(ge=0.0, le=1.0, description="Overall quality score (0.0 to 1.0).")
+    strengths: List[str] = Field(description="What the response does well.")
+    weaknesses: List[str] = Field(description="Areas for improvement.")
+    improvement_suggestions: List[str] = Field(description="Actionable suggestions for improvement.")
+
+class VerificationOutput(BaseModel):
+    verification: Verification
+
+
+FALLBACK_PLAN = PlanOutput(plan=ResponsePlan(
+    goal="To provide comfort and actionable steps to help the user manage their emotions.",
+    steps=["Acknowledge feelings.", "Suggest techniques.", "Encourage action.", "Offer more help."],
+    considerations=["Be empathetic.", "Tailor to personality.", "Consider emotion intensity."]
+))
+FALLBACK_VERIFICATION = VerificationOutput(verification=Verification(
+    quality_score=0.5,
+    strengths=["Response is likely empathetic."],
+    weaknesses=["Response could be more personalized or specific."],
+    improvement_suggestions=["Ensure the suggestions directly address the user's stated problem."]
+))
+
+
+
+
 
 class PlannerVerifierAgent:
     """
@@ -40,128 +78,37 @@ class PlannerVerifierAgent:
             temperature=temperature, 
             model_name=os.getenv("PLANNER_MODEL", "gpt-4o")
         )
-        
-        self.planning_format_instructions = """
-        You must respond with a JSON object with the following structure:
-        {
-            "plan": {
-                "goal": "The main goal of the response",
-                "steps": [
-                    "Step 1: Description",
-                    "Step 2: Description",
-                    ...
-                ],
-                "considerations": [
-                    "Important consideration 1",
-                    "Important consideration 2",
-                    ...
-                ]
-            }
-        }
-        
-        Respond ONLY with the JSON object, no other text. Do not include markdown formatting, code blocks, or backticks.
-        """
-        
-        self.verification_format_instructions = """
-        You must respond with a JSON object with the following structure:
-        {
-            "verification": {
-                "quality_score": <float 0-1>,
-                "strengths": [
-                    "Strength 1",
-                    "Strength 2",
-                    ...
-                ],
-                "weaknesses": [
-                    "Weakness 1",
-                    "Weakness 2",
-                    ...
-                ],
-                "improvement_suggestions": [
-                    "Suggestion 1",
-                    "Suggestion 2",
-                    ...
-                ]
-            }
-        }
-        
-        Respond ONLY with the JSON object, no other text. Do not include markdown formatting, code blocks, or backticks.
-        """
-        
-        self.planning_prompt = ChatPromptTemplate.from_messages([
-            ("system", """You are an expert planner for emotion regulation assistance.
-            Create a detailed plan for how to respond to the user based on their
-            emotional state, personality traits, and the context of their message.
-            
-            {format_instructions}
-            """),
-            ("user", """
-            User message: {user_message}
-            
+
+
+        # --- Setup for Planning Chain ---
+        planning_parser = PydanticOutputParser(pydantic_object=PlanOutput)
+        planning_prompt = ChatPromptTemplate.from_messages([
+            ("system", "You are an expert planner for an empathetic AI assistant. Create a detailed plan to respond to the user based on their situation.\n\n{format_instructions}"),
+            ("user", """User message: {user_message}
             Emotion analysis: {emotion_analysis}
-            
-            Personality traits (OCEAN model, scale 0-10):
-            - Openness: {openness}
-            - Conscientiousness: {conscientiousness}
-            - Extraversion: {extraversion}
-            - Agreeableness: {agreeableness}
-            - Neuroticism: {neuroticism}
-            
-            Chat history:
-            {chat_history}
-            """)
-        ])
+            Personality traits (OCEAN 0-10): {personality_traits}
+            Recent Chat history:\n{chat_history}""")
+        ]).partial(format_instructions=planning_parser.get_format_instructions())
         
-        self.verification_prompt = ChatPromptTemplate.from_messages([
-            ("system", """You are an expert verifier for emotion regulation assistance.
-            Evaluate the quality of the response to the user based on their
-            emotional state, personality traits, and the context of their message.
-            
-            {format_instructions}
-            """),
-            ("user", """
-            User message: {user_message}
-            
+        self.planning_chain = planning_prompt | self.llm | planning_parser
+
+
+        # --- Setup for Verification Chain ---
+        verification_parser = PydanticOutputParser(pydantic_object=VerificationOutput)
+        verification_prompt = ChatPromptTemplate.from_messages([
+            ("system", "You are an expert quality assurance agent for an emotion regulation AI assistant. Evaluate the quality of the generated response.\n\n{format_instructions}"),
+            ("user", """User message: {user_message}
             Emotion analysis: {emotion_analysis}
-            
-            Personality traits (OCEAN model, scale 0-10):
-            - Openness: {openness}
-            - Conscientiousness: {conscientiousness}
-            - Extraversion: {extraversion}
-            - Agreeableness: {agreeableness}
-            - Neuroticism: {neuroticism}
-            
-            Response to verify:
-            {response_to_verify}
-            """)
-        ])
-        
-        self.output_parser = StrOutputParser()
+            Personality traits (OCEAN 0-10): {personality_traits}
+            RESPONSE TO VERIFY:\n---\n{response_to_verify}\n---""")
+        ]).partial(format_instructions=verification_parser.get_format_instructions())
+
+        self.verification_chain = verification_prompt | self.llm | verification_parser
     
-    def _clean_json_response(self, response: str) -> str:
-        """
-        Clean a response string to extract valid JSON.
-        
-        Args:
-            response (str): The response string that may contain markdown or other formatting.
-            
-        Returns:
-            str: A cleaned string containing only the JSON object.
-        """
-        # Log the raw response for debugging
-        logger.debug(f"Raw response before cleaning: {response}")
-        
-        # Remove markdown code blocks if present
-        json_pattern = r'```(?:json)?\s*([\s\S]*?)\s*```'
-        match = re.search(json_pattern, response)
-        if match:
-            cleaned = match.group(1).strip()
-            logger.debug(f"Extracted JSON from code block: {cleaned}")
-            return cleaned
-        
-        # If no code blocks, return the original response
-        logger.debug("No code blocks found, returning original response")
-        return response.strip()
+
+
+
+
     
     def create_plan(
         self, 
@@ -183,89 +130,22 @@ class PlannerVerifierAgent:
         Returns:
             Dict[str, Any]: A dictionary containing the plan.
         """
+
         logger.info("Creating response plan...")
-        
-        # Format chat history as a string
-        formatted_history = ""
-        for msg in chat_history[-5:]:  # Use last 5 messages for context
-            role = msg.get('role', 'unknown')
-            content = msg.get('content', '')
-            formatted_history += f"{role.capitalize()}: {content}\n\n"
-        
-        # Create the chain
-        chain = self.planning_prompt | self.llm | self.output_parser
-        
-        # Run the chain
+
         try:
-            response = chain.invoke({
+            response = self.planning_chain.with_retry().invoke({
                 "user_message": user_message,
-                "emotion_analysis": json.dumps(emotion_analysis, indent=2),
-                "openness": personality_traits.get("openness", 5),
-                "conscientiousness": personality_traits.get("conscientiousness", 5),
-                "extraversion": personality_traits.get("extraversion", 5),
-                "agreeableness": personality_traits.get("agreeableness", 5),
-                "neuroticism": personality_traits.get("neuroticism", 5),
-                "chat_history": formatted_history,
-                "format_instructions": self.planning_format_instructions
+                "emotion_analysis": json.dumps(emotion_analysis),
+                "personality_traits": json.dumps(personality_traits),
+                "chat_history": format_chat_history(chat_history[-5:])
             })
-            
-            # Clean the response to extract valid JSON
-            cleaned_response = self._clean_json_response(response)
-            
-            # Parse the JSON response
-            try:
-                result = json.loads(cleaned_response)
-                logger.debug(f"Planning result: {result}")
-                return result
-            except json.JSONDecodeError as e:
-                logger.error(f"Error parsing planning response: {e}")
-                logger.error(f"Raw response: {response}")
-                logger.error(f"Cleaned response: {cleaned_response}")
-                
-                # Fallback plan if parsing fails
-                fallback_plan = {
-                    "plan": {
-                        "goal": "To provide comfort and actionable steps to help the user manage their emotions.",
-                        "steps": [
-                            "Step 1: Acknowledge the user's feelings and validate their emotional state.",
-                            "Step 2: Suggest appropriate emotion regulation techniques.",
-                            "Step 3: Encourage the user to try the suggested techniques.",
-                            "Step 4: Offer to provide additional resources or suggestions if needed."
-                        ],
-                        "considerations": [
-                            "Be empathetic and supportive.",
-                            "Tailor suggestions to the user's personality traits.",
-                            "Consider the intensity of the user's emotions."
-                        ]
-                    }
-                }
-                
-                logger.info("Using fallback plan due to parsing error")
-                return fallback_plan
-                
+            return response.model_dump()
         except Exception as e:
-            logger.error(f"Error invoking planning chain: {e}")
-            
-            # Fallback plan if chain invocation fails
-            fallback_plan = {
-                "plan": {
-                    "goal": "To provide comfort and actionable steps to help the user manage their emotions.",
-                    "steps": [
-                        "Step 1: Acknowledge the user's feelings and validate their emotional state.",
-                        "Step 2: Suggest appropriate emotion regulation techniques.",
-                        "Step 3: Encourage the user to try the suggested techniques.",
-                        "Step 4: Offer to provide additional resources or suggestions if needed."
-                    ],
-                    "considerations": [
-                        "Be empathetic and supportive.",
-                        "Tailor suggestions to the user's personality traits.",
-                        "Consider the intensity of the user's emotions."
-                    ]
-                }
-            }
-            
-            logger.info("Using fallback plan due to chain invocation error")
-            return fallback_plan
+            logger.error(f"Error in planning chain: {e}", exc_info=True)
+            logger.warning("Using fallback plan due to an error.")
+            return FALLBACK_PLAN.model_dump()
+    
     
     def verify_response(
         self, 
@@ -287,77 +167,19 @@ class PlannerVerifierAgent:
         Returns:
             Dict[str, Any]: A dictionary containing the verification results.
         """
-        logger.info("Verifying response...")
-        
-        # Create the chain
-        chain = self.verification_prompt | self.llm | self.output_parser
-        
-        # Run the chain
+   
+        logger.info("Verifying response quality...")
         try:
-            response = chain.invoke({
+            response = self.verification_chain.with_retry().invoke({
                 "user_message": user_message,
-                "emotion_analysis": json.dumps(emotion_analysis, indent=2),
-                "openness": personality_traits.get("openness", 5),
-                "conscientiousness": personality_traits.get("conscientiousness", 5),
-                "extraversion": personality_traits.get("extraversion", 5),
-                "agreeableness": personality_traits.get("agreeableness", 5),
-                "neuroticism": personality_traits.get("neuroticism", 5),
-                "response_to_verify": response_to_verify,
-                "format_instructions": self.verification_format_instructions
+                "emotion_analysis": json.dumps(emotion_analysis),
+                "personality_traits": json.dumps(personality_traits),
+                "response_to_verify": response_to_verify
             })
-            
-            # Clean the response to extract valid JSON
-            cleaned_response = self._clean_json_response(response)
-            
-            # Parse the JSON response
-            try:
-                result = json.loads(cleaned_response)
-                logger.debug(f"Verification result: {result}")
-                return result
-            except json.JSONDecodeError as e:
-                logger.error(f"Error parsing verification response: {e}")
-                logger.error(f"Raw response: {response}")
-                logger.error(f"Cleaned response: {cleaned_response}")
-                
-                # Fallback verification if parsing fails
-                fallback_verification = {
-                    "verification": {
-                        "quality_score": 0.8,
-                        "strengths": [
-                            "The response is empathetic and supportive.",
-                            "The response provides actionable suggestions."
-                        ],
-                        "weaknesses": [
-                            "The response could be more personalized."
-                        ],
-                        "improvement_suggestions": [
-                            "Consider adding more specific suggestions based on the user's personality."
-                        ]
-                    }
-                }
-                
-                logger.info("Using fallback verification due to parsing error")
-                return fallback_verification
-                
+            return response.model_dump()
+        
+        
         except Exception as e:
-            logger.error(f"Error invoking verification chain: {e}")
-            
-            # Fallback verification if chain invocation fails
-            fallback_verification = {
-                "verification": {
-                    "quality_score": 0.8,
-                    "strengths": [
-                        "The response is empathetic and supportive.",
-                        "The response provides actionable suggestions."
-                    ],
-                    "weaknesses": [
-                        "The response could be more personalized."
-                    ],
-                    "improvement_suggestions": [
-                        "Consider adding more specific suggestions based on the user's personality."
-                    ]
-                }
-            }
-            
-            logger.info("Using fallback verification due to chain invocation error")
-            return fallback_verification
+            logger.error(f"Error in verification chain: {e}", exc_info=True)
+            logger.warning("Using fallback verification due to an error.")
+            return FALLBACK_VERIFICATION.model_dump()

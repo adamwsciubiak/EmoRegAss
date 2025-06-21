@@ -69,9 +69,10 @@ class ChatMemory:
         if include_timestamps:
             return self.messages
         
-        # Return messages without timestamps
-        return [{k: v for k, v in msg.items() if k != 'timestamp'} 
-                for msg in self.messages]
+        # Return messages 
+        return [
+            {"role": msg["role"], "content": msg["content"]} for msg in self.messages
+        ]
     
     def get_last_n_messages(self, n: int, include_timestamps: bool = False) -> List[Dict[str, str]]:
         """

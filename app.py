@@ -153,17 +153,14 @@ SUGGESTED_PROMPTS = [
 def handle_user_input():
     user_message = st.session_state.user_input
     if user_message:
-        # Store the message in session state for processing
+        # The only job of the callback is to set the state.
         st.session_state.user_message = user_message
-        # This forces streamlit to rerun the script
-        st.rerun()
 
 # Function to process suggested prompt
 def use_suggested_prompt(prompt):
     # Store the prompt in session state instead of directly updating chat history
     st.session_state.user_message = prompt
-    # This forces streamlit to rerun the script
-    st.rerun()
+
 
 # Toggle log visibility
 def toggle_logs():

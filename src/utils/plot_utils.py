@@ -55,5 +55,12 @@ def create_emotion_trajectory_plot(valence_history: List[float], arousal_history
     ax.grid(True, linestyle='--', linewidth=0.5)
     ax.set_facecolor('#f7f7f7')
 
+        ## Add quadrant labels for better context
+    ax.text(0.5, 0.5, 'Excited / Happy', ha='center', va='center', fontsize=9, color='gray', alpha=0.4)
+    ax.text(-0.5, 0.5, 'Tense / Anxious', ha='center', va='center', fontsize=9, color='gray', alpha=0.4)
+    ax.text(-0.5, -0.5, 'Sad / Depressed', ha='center', va='center', fontsize=9, color='gray', alpha=0.4)
+    ax.text(0.5, -0.5, 'Calm / Relaxed', ha='center', va='center', fontsize=9, color='gray', alpha=0.4)
+
+
     plt.tight_layout()
     return fig

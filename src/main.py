@@ -30,7 +30,7 @@ def run_emotion_regulation_pipeline(
     rag_agent: RAGAgent,
     planner_verifier_agent: PlannerVerifierAgent,
     empathetic_response_agent: EmpatheticResponseAgent
-) -> (str, Dict[str, Any]):  # Return a tuple: (response, analysis)
+    ) -> tuple[str, Dict[str, Any]]:  # Return a tuple: (response, analysis)
     """
     Orchestrates the full emotion regulation pipeline.
     This function is stateless and relies on inputs for all operations.

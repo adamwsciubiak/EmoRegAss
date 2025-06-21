@@ -13,6 +13,6 @@ matplotlib
 openai
 pypdf
 python-dotenv
-pytantic
+pydantic
 streamlit
 supabase

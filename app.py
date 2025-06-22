@@ -5,7 +5,7 @@ This module provides a web interface for the Emotion Regulation Assistant
 using Streamlit.
 """
 
-import streamlit as st
+import streamlit as st 
 import os
 import json
 import time
@@ -16,6 +16,23 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from src.utils.plot_utils import create_emotion_trajectory_plot
+
+
+from src.components.emotion_recognition import EmotionRecognitionModel
+from src.components.rag_agent import RAGAgent
+from src.components.empathetic_response import EmpatheticResponseAgent
+from src.utils.memory import ChatMemory
+from src.utils.vector_store import VectorStoreManager
+
+from src.main import run_pico_pipeline  # We will rename the pipeline function
+from src.components.pico_planner import PicoPlanner
+from src.components.action_executor import ActionExecutor
+from src.utils.action_catalog import EmotionalState # For type hinting
+
+
+# =================== CONFIG ====================================
+activateRAG = True 
+goal_state_arousal_valence = (0.3, 0.3)
 
 
 # Load environment variables
@@ -62,14 +79,9 @@ def clear_logs():
         error_details = traceback.format_exc()
         logger.error(f"Error clearing log file: {e}\n{error_details}")
 
-# --- REFACTOR: Import the new pipeline function and components ---
-from src.main import run_emotion_regulation_pipeline
-from src.components.emotion_recognition import EmotionRecognitionModel
-from src.components.rag_agent import RAGAgent
-from src.components.planner_verifier import PlannerVerifierAgent
-from src.components.empathetic_response import EmpatheticResponseAgent
-from src.utils.memory import ChatMemory
-from src.utils.vector_store import VectorStoreManager
+
+
+
 
 
 # Set page configuration
@@ -105,13 +117,35 @@ if "vector_store_manager" not in st.session_state:
     st.session_state.rag_agent = RAGAgent(vector_store=vector_store)
     logger.info("Initialized VectorStoreManager and RAGAgent.")
 
-if "planner_verifier_agent" not in st.session_state:
-    st.session_state.planner_verifier_agent = PlannerVerifierAgent()
-    logger.info("Initialized PlannerVerifierAgent.")
 
 if "empathetic_response_agent" not in st.session_state:
     st.session_state.empathetic_response_agent = EmpatheticResponseAgent()
     logger.info("Initialized EmpatheticResponseAgent.")
+
+
+# Initialize the PicoPlanner based on the paper
+if "pico_planner" not in st.session_state:
+    st.session_state.pico_planner = PicoPlanner()
+    logger.info("Initialized PicoPlanner.")
+
+# Initialize the ActionExecutor, reusing the other agents
+if "action_executor" not in st.session_state:
+    st.session_state.action_executor = ActionExecutor(
+        rag_agent=st.session_state.rag_agent,
+        response_agent=st.session_state.empathetic_response_agent
+    )
+    logger.info("Initialized ActionExecutor.")
+
+# Define the user's target emotional state (Sε from the paper)
+if "goal_state" not in st.session_state:
+    # Using (Arousal, Valence) from the paper's case study, Sec 5.
+    st.session_state.goal_state: EmotionalState = goal_state_arousal_valence 
+    logger.info(f"Set default goal state to {st.session_state.goal_state}")
+
+# Add a state variable for the RAG toggle
+if "use_rag" not in st.session_state:
+    st.session_state.use_rag = activateRAG 
+
 
 
 if "emotion_analysis" not in st.session_state:
@@ -204,8 +238,11 @@ def main():
     with st.sidebar:
         st.title("Admin Panel")
         st.write("*won't be visible for study participants.*")
-
-
+        st.session_state.use_rag = st.toggle(
+            "Enable RAG for Responses",
+            value=st.session_state.use_rag,
+            help="ON: The executor uses RAG to generate detailed descriptions. OFF: It uses a simpler placeholder."
+        )
         st.title("Personality Profile")
         st.write("*professional scales and/or specialized models will be used later... but for now have fun and adjust the sliders*:")
         
@@ -284,6 +321,7 @@ def main():
             # Display emotion trajectory plot if we have data
             if st.session_state.valence_history:
                 st.title("Emotion Trajectory")
+                st.write("Click to fullscren")
                 fig = create_emotion_trajectory_plot(
                     st.session_state.valence_history, 
                     st.session_state.arousal_history
@@ -363,14 +401,16 @@ def process_message(user_message):
         start_time = time.time()
         
         # Call the stateless pipeline function with all necessary components from session_state
-        response, emotion_analysis = run_emotion_regulation_pipeline(
+        # NEW process_message call
+        response, emotion_analysis = run_pico_pipeline(
             user_message=user_message,
             personality_traits=st.session_state.personality_traits,
+            goal_state=st.session_state.goal_state,
+            use_rag=st.session_state.use_rag,
             chat_memory=st.session_state.chat_memory,
-            emotion_recognition_model=st.session_state.emotion_recognition_model,
-            rag_agent=st.session_state.rag_agent,
-            planner_verifier_agent=st.session_state.planner_verifier_agent,
-            empathetic_response_agent=st.session_state.empathetic_response_agent
+            emotion_model=st.session_state.emotion_recognition_model, # This will be your classifier later
+            pico_planner=st.session_state.pico_planner,
+            action_executor=st.session_state.action_executor
         )
         
         processing_time = time.time() - start_time

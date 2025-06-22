@@ -1,86 +1,90 @@
-Emotion Regulation Assistant
+# Emotion Regulation Assistant (Pico Architecture Implementation)
 
+A prototype of an "Affective Intelligent AI" powered assistant that helps users regulate their emotions.
 
-*Please note that it's a prototype and although it has access to some mental health related publications, it's yet to be polished (pun intended).* **Do NOT share any sensitive information, do NOT use it for a serious advice.**
-        
+*Please note that this is a prototype implementation for a master's thesis project. It is intended for research purposes and it's yet to be polished (pun intended).* **Do NOT share any sensitive information and do NOT use it for serious mental advice.**
 
+This version implements the formal architecture described in the paper: **"Towards an Affective Intelligent Agent Model for Extrinsic Emotion Regulation" by Pico et al. (2024)**.
 
-An AI-powered assistant that helps users regulate their emotions by providing personalized emotion regulation techniques based on their emotional state and personality traits.
+It replaces the purely LLM-based planning of the original prototype with a deterministic `PicoPlanner` that selects actions based on user emotional state, a target equilibrium, and personality traits, as detailed in the paper.
 
-Features
+---
 
-- Emotion recognition from text
-- Personalized emotion regulation techniques
-- User-configurable personality traits (OCEAN model)
-- Interactive chat interface
-- Real-time emotion analysis visualization
+### Features
 
-Installation
+-   **Classifier-Ready Emotion Recognition:** The emotion recognition module is designed to be swapped with a formal classifier model.
+-   **Theory-Grounded Planning:** Implements the `PicoPlanner`, which uses formulas from the source paper to select the optimal regulation strategy.
+-   **Toggleable RAG Executor:** The `ActionExecutor` can generate responses using either static, pre-defined templates or a dynamic RAG pipeline for detailed technique descriptions.
+-   User-configurable personality traits (OCEAN model).
+-   Interactive chat interface with real-time emotion trajectory visualization.
 
-1. Clone the repository:
-   git clone https://github.com/adamwsciubiak/EmoRegAss.git
-   cd emotion-regulation-assistant
+### Installation
 
-2. Install the required packages:
-   pip install -r requirements.txt
+1.  Clone the repository and switch to this branch:
+    ```bash
+    git clone https://github.com/adamwsciubiak/EmoRegAss.git
+    cd EmoRegAss
+    git checkout Legit_implementation_of_Pico_pipeline_workbranch
+    ```
 
-3. Create a .env file following env_template.txt
+2.  Install the required packages:
+    ```bash
+    pip install -r requirements.txt
+    ```
 
+3.  Create a `.env` file by copying `env_template.txt` and fill in your API keys.
 
-Usage
+### Usage
 
 Run the Streamlit app:
+```bash
 streamlit run app.py
+```
+Then open your browser and go to `http://localhost:8501`. Use the "Developer Controls" in the sidebar to toggle RAG functionality.
 
-Then open your browser and go to http://localhost:8501
+---
 
-Project Structure
+### How It Works
 
-- src/: Source code
-  - components/: Individual components
-    - emotion_recognition.py: Emotion recognition model
-    - empathetic_response.py: Empathetic response generator
-    - planner_verifier.py: Planner-Verifier agent
-    - rag_agent.py: Retrieval-Augmented Generation agent
-  - pipeline/: RAG pipeline components
-  - utils/: Utility functions
-    - openai_utils.py: OpenAI API utilities
-    - memory.py: Chat memory management
-    - google_drive_utils.py: Google Drive utilities (RAG)
-    - pdf_utilis.py: PDF utilities
-    - vector_store.py: Vector store management
-  - tests/: Test files: not published yet
-  - config.py: Configuration file
-  - main.py: Main application
-- app.py: Streamlit web interface
-- assistant_logs.log: Log file for assistant activities
-- README.md: Project description and installation instructions
-- requirements.txt: Python dependencies
-- run_pipeline.py: RAG pipeline
-- runtime.txt: Python config for streamlit
+1.  The user enters a message in the chat interface.
+2.  The system determines the user's current emotional state (`Sa`) (Arousal/Valence).
+3.  The `PicoPlanner` calculates the optimal regulation action by evaluating each option against the user's current state (`Sa`), goal state (`Sε`), and personality profile (`t`), based on **Equation 2** from the paper.
+4.  The chosen action (e.g., "Distraction") is passed to the `ActionExecutor`.
+5.  The `ActionExecutor` optionally uses the `RAGAgent` to retrieve detailed information about the chosen action.
+6.  It then uses the `EmpatheticResponseAgent` to synthesize this information into a final, user-facing message.
+7.  The response is displayed to the user.
 
-How It Works
 
-1. The user enters a message in the chat interface
-2. The system analyzes the emotional content of the message
-3. Based on the user's emotional state and personality traits, the system retrieves relevant emotion regulation techniques
-4. The system generates an empathetic response that incorporates the techniques
-5. The response is verified for quality and regenerated if necessary
-6. The response is displayed to the user
+---
+### Project Structure
 
-License
+The architecture is modular, separating the deterministic planner from the response generation logic.
+
+-   `src/`
+    -   `components/`: Core runtime components of the agent (`pico_planner`, `action_executor`, etc.).
+    -   `utils/`: Shared utility functions.
+        -   `RAG upload/`: Scripts for the offline data ingestion pipeline (`drive_to_supabase`, etc.).
+        -   `action_catalog.py`: Defines the regulation actions and their properties as per the paper.
+-   `app.py`: The Streamlit web interface.
+-   `main.py`: Contains the core `run_pico_pipeline` orchestration logic.
+
+---
+
+### Future Work & Research Roadmap
+
+This project is under active development. The key areas for future work include:
+
+-   **Q-Learning Implementation:** The highest priority is to implement the Q-learning-based planner improvement and personalization layer, as described in Section 4.3 of the Pico et al. paper. This will allow the agent to learn from user interactions and dynamically adapt its strategy.
+-   **Language Localization:** The final version of the agent is intended to operate entirely in **Polish**.
+-   **Open-Source Model Integration:**
+    -   **Emotion Classifier:** Replace the current LLM-based emotion recognition with a dedicated, open-source classifier model that maps text directly to Arousal-Valence values.
+    -   **Executor:** Transition from OpenAI models to open-source models for the response generation and RAG components. This includes exploring Polish-language models like `Bielik` or `PLLuM`.Test various approaches for the executor, including using a pre-trained model like "ChatCounselor" (Liu et al., 2023), fine-tuning a model on similar therapeutic conversation data...
+    -   **RAG and Vector Database:** Migrate from the current vector store solution to a fully open-source alternative like `Qdrant`. The data ingestion pipeline needs adaptation after changes. Tokenizing is also yet to be improved.
+    -   **Content Improvement:** Refine the `action_executor`'s internal plans, improve the static descriptions for RAG-less runs, and enhance the RAG knowledge base with more detailed documents on regulation techniques.
+
+---
+
+
+### License
 
 MIT
-
-
-
-
-
-
-
-
-
-
-
-
-

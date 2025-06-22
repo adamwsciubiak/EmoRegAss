@@ -22,7 +22,9 @@ from src.components.emotion_recognition import EmotionRecognitionModel
 from src.components.rag_agent import RAGAgent
 from src.components.empathetic_response import EmpatheticResponseAgent
 from src.utils.memory import ChatMemory
-from src.utils.vector_store import VectorStoreManager
+from src.utils.vector_store_connector import VectorStoreConnector
+
+
 
 from src.main import run_pico_pipeline  # We will rename the pipeline function
 from src.components.pico_planner import PicoPlanner
@@ -111,11 +113,15 @@ if "emotion_recognition_model" not in st.session_state:
     st.session_state.emotion_recognition_model = EmotionRecognitionModel()
     logger.info("Initialized EmotionRecognitionModel.")
 
-if "vector_store_manager" not in st.session_state:
-    st.session_state.vector_store_manager = VectorStoreManager()
-    vector_store = st.session_state.vector_store_manager.load_or_create()
+# Initialize RAG Agent by first creating a vector store connection
+if "rag_agent" not in st.session_state:
+    # 1. Create an instance of the new connector.
+    connector = VectorStoreConnector()
+    # 2. Use it to load the vector store.
+    vector_store = connector.load_vector_store()
+    # 3. Inject the loaded vector store into the RAGAgent during its initialization.
     st.session_state.rag_agent = RAGAgent(vector_store=vector_store)
-    logger.info("Initialized VectorStoreManager and RAGAgent.")
+    logger.info("Initialized VectorStoreConnector and RAGAgent.")
 
 
 if "empathetic_response_agent" not in st.session_state:

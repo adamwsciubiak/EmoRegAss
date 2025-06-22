@@ -18,7 +18,6 @@ from src.components.action_executor import ActionExecutor
 from src.utils.action_catalog import EmotionalState
 
 from src.utils.memory import ChatMemory
-from src.utils.vector_store import VectorStoreManager
 
 # Configure logging (can be simplified, but let's keep it for now)
 logger = logging.getLogger(__name__)

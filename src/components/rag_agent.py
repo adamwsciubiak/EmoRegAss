@@ -12,7 +12,7 @@ from typing import Dict, Any, List
 import logging
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import PydanticOutputParser
-# --- We will use RunnableParallel and itemgetter correctly this time ---
+
 from langchain_core.runnables import RunnableParallel, RunnablePassthrough
 from operator import itemgetter
 from langchain_core.documents import Document

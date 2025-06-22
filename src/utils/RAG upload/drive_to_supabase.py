@@ -14,7 +14,8 @@ from dotenv import load_dotenv
 
 from src.utils.google_drive_utils import GoogleDriveMonitor
 from src.utils.pdf_utils import PDFExtractor
-from src.utils.vector_store import VectorStoreManager
+from src.pipeline.document_processor import DocumentProcessor
+
 
 # Load environment variables
 load_dotenv()

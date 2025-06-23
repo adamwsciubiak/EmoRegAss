@@ -6,7 +6,7 @@ notes.txt
 
 # Virtual environment folder
 venv/
-emoregass_env/
+emoreass_env/
 
 # Python cache files
 __pycache__/

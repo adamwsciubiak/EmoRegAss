@@ -6,14 +6,14 @@ A prototype of an "Affective Intelligent AI" powered assistant that helps users 
 
 This version implements the formal architecture described in the paper: **"Towards an Affective Intelligent Agent Model for Extrinsic Emotion Regulation" by Pico et al. (2024)**.
 
-It replaces the purely LLM-based planning of the original prototype with a deterministic `PicoPlanner` that selects actions based on user emotional state, a target equilibrium, and personality traits, as detailed in the paper.
+It replaces the purely LLM-based planning of the original prototype with a deterministic `PicoPlanner` that selects actions based on user emotional state, a target equilibrium, and personality traits, as detailed in the paper. The most recent version also features a **dynamic, learning-based planner** that evolves over time through Q-learning, as detailed in the paper (however this aspect still needs some love).
 
 ---
 
 ### Features
 
 -   **Classifier-Ready Emotion Recognition:** The emotion recognition module is designed to be swapped with a formal classifier model.
--   **Theory-Grounded Planning:** Implements the `PicoPlanner`, which uses formulas from the source paper to select the optimal regulation strategy.
+   **Dynamic, Learning-Based Planning:** Implements a `PicoPlanner` enhanced with a `QLearningManager`. The agent's strategy begins with a "warm start" based on the paper's static formulas and then **learns and adapts** from user interactions via Q-learning.
 -   **Toggleable RAG Executor:** The `ActionExecutor` can generate responses using either static, pre-defined templates or a dynamic RAG pipeline for detailed technique descriptions.
 -   User-configurable personality traits (OCEAN model).
 -   Interactive chat interface with real-time emotion trajectory visualization.
@@ -48,11 +48,12 @@ Then open your browser and go to `http://localhost:8501`. Use the "Developer Con
 
 1.  The user enters a message in the chat interface.
 2.  The system determines the user's current emotional state (`Sa`) (Arousal/Valence).
-3.  The `PicoPlanner` calculates the optimal regulation action by evaluating each option against the user's current state (`Sa`), goal state (`Sε`), and personality profile (`t`), based on **Equation 2** from the paper.
-4.  The chosen action (e.g., "Distraction") is passed to the `ActionExecutor`.
-5.  The `ActionExecutor` optionally uses the `RAGAgent` to retrieve detailed information about the chosen action.
-6.  It then uses the `EmpatheticResponseAgent` to synthesize this information into a final, user-facing message.
-7.  The response is displayed to the user.
+3.  **Learning Step:** If this is not the first turn, the system calculates a `reward` based on how the last action affected the user's emotional state (i.e., did it move closer to the goal state `Sε`?). It uses this reward to update its internal **Q-table**.
+4.  **Planning Step:** The `PicoPlanner` queries the `QLearningManager`. IT calculates the optimal regulation action by evaluating each option against the user's current state (`Sa`), goal state (`Sε`), and personality profile (`t`), Using an epsilon-greedy strategy on the Q-table, the manager selects the optimal action for the current state.
+5.  The chosen action (e.g., "Distraction") is passed to the `ActionExecutor`.
+6.  The `ActionExecutor` optionally uses the `RAGAgent` to retrieve detailed information about the chosen action.
+7.  It then uses the `EmpatheticResponseAgent` to synthesize this information into a final, user-facing message.
+8.  The response is displayed to the user.
 
 
 ---
@@ -74,7 +75,7 @@ The architecture is modular, separating the deterministic planner from the respo
 
 This project is under active development. The key areas for future work include:
 
--   **Q-Learning Implementation:** The highest priority is to implement the Q-learning-based planner improvement and personalization layer, as described in Section 4.3 of the Pico et al. paper. This will allow the agent to learn from user interactions and dynamically adapt its strategy.
+-   **Persistence:** Save and load the agent's learned Q-table between sessions to create a truly personalized, long-term assistant.
 -   **Language Localization:** The final version of the agent is intended to operate entirely in **Polish**.
 -   **Open-Source Model Integration:**
     -   **Emotion Classifier:** Replace the current LLM-based emotion recognition with a dedicated, open-source classifier model that maps text directly to Arousal-Valence values.

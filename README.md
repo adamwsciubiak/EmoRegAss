@@ -13,7 +13,7 @@ It replaces the purely LLM-based planning of the original prototype with a deter
 ### Features
 
 -   **Classifier-Ready Emotion Recognition:** The emotion recognition module is designed to be swapped with a formal classifier model.
-   **Dynamic, Learning-Based Planning:** Implements a `PicoPlanner` enhanced with a `QLearningManager`. The agent's strategy begins with a "warm start" based on the paper's static formulas and then **learns and adapts** from user interactions via Q-learning.
+-   **Dynamic, Learning-Based Planning:** Implements a `PicoPlanner` enhanced with a `QLearningManager`. The agent's strategy begins with a "warm start" based on the paper's static formulas and then **learns and adapts** from user interactions via Q-learning.
 -   **Toggleable RAG Executor:** The `ActionExecutor` can generate responses using either static, pre-defined templates or a dynamic RAG pipeline for detailed technique descriptions.
 -   User-configurable personality traits (OCEAN model).
 -   Interactive chat interface with real-time emotion trajectory visualization.

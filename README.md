@@ -42,6 +42,13 @@ streamlit run app.py
 ```
 Then open your browser and go to `http://localhost:8501`. Use the "Developer Controls" in the sidebar to toggle RAG functionality.
 
+
+To upload files to database:
+```bash
+python "src/utils/RAG_upload/local_to_supabase.py" --source-dir "src/utils/RAG_upload/documents_for_RAG"
+```
+
+
 ---
 
 ### How It Works

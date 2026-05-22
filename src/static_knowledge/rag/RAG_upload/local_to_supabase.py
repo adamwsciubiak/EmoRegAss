@@ -17,8 +17,8 @@ if project_root not in sys.path:
 # Now, use absolute imports from 'src', which is robust and clear.
 # This works because the sys.path was just modified.
 # NOTE: Using the RENAMED folder 'RAG_upload' and your filename 'pdf_utilis'.
-from src.utils.RAG_upload.pdf_utilis import PDFExtractor
-from src.utils.RAG_upload.document_processor import DocumentProcessor
+from EmoRegAss.src.static_knowlage.rag.RAG_upload.pdf_utilis import PDFExtractor
+from EmoRegAss.src.static_knowlage.rag.RAG_upload.document_processor import DocumentProcessor
 
 # Load environment variables from .env file
 load_dotenv()

@@ -4,17 +4,20 @@ A prototype of an "Affective Intelligent AI" powered assistant that helps users 
 
 *Please note that this is a prototype implementation for a master's thesis project. It is intended for research purposes and it's yet to be polished (pun intended).* **Do NOT share any sensitive information and do NOT use it for serious mental advice.**
 
-This version implements the formal architecture described in the paper: **"Towards an Affective Intelligent Agent Model for Extrinsic Emotion Regulation" by Pico et al. (2024)**.
+This version implements the formal architecture described in the paper: **"Towards an Affective Intelligent Agent Model for Extrinsic Emotion Regulation" by Pico et al. (2024)**. 
 
-It replaces the purely LLM-based planning of the original prototype with a deterministic `PicoPlanner` that selects actions based on user emotional state, a target equilibrium, and personality traits, as detailed in the paper. The most recent version also features a **dynamic, learning-based planner** that evolves over time through Q-learning, as detailed in the paper (however this aspect still needs some love).
+It replaces the purely LLM-based planning of original prototypes with a strictly structured, multi-agent cognitive architecture. It features a **dynamic, learning-based planner** that evolves over time through Q-learning, seamlessly integrated with J. Gross's theoretical framework of emotion regulation.
 
 ---
 
 ### Features
 
--   **Classifier-Ready Emotion Recognition:** The emotion recognition module is designed to be swapped with a formal classifier model.
--   **Dynamic, Learning-Based Planning:** Implements a `PicoPlanner` enhanced with a `QLearningManager`. The agent's strategy begins with a "warm start" based on the paper's static formulas and then **learns and adapts** from user interactions via Q-learning.
--   **Toggleable RAG Executor:** The `ActionExecutor` can generate responses using either static, pre-defined templates or a dynamic RAG pipeline for detailed technique descriptions.
+-   **Classifier-Ready Emotion Recognition:** The emotion recognition module maps user input to a 2D Arousal-Valence space (Russell's circumplex model). Designed to be swapped with a formal ML classifier model.
+-   **Dynamic Cognitive Planner:** A unified `DynamicPlanner` implementing the exact mathematical models from Pico et al. (2024), enhanced with a stabilizing scaling factor. It executes a 3-step cognitive cycle: Evaluation (Critic), Strategy (Actor), and Tactics (Retrieval).
+-   **Persistent Q-Learning:** The agent learns from user interactions. Its policy (Q-Table) is continuously updated and saved as a human-readable CSV, preserving the personalization of the agent across sessions.
+-   **Cognitive Memory Separation:** Implements strict separation between **Sensory Memory** (tracking Markov Decision Process states for Reinforcement Learning) and **Episodic Memory** (maintaining conversational context for Natural Language Generation).
+-   **Latency-Optimized RAG Engine:** The static knowledge base uses a pure semantic retrieval pipeline (bypassing redundant LLM calls) to fetch psychological technique manuals quickly and securely.
+-   **Strict Data Privacy Bottleneck:** The raw user message is shielded from the mathematical and planning cores, entering the system only at the perception (Emotion Recognition) and final actuation (Executor) stages.
 -   User-configurable personality traits (OCEAN model).
 -   Interactive chat interface with real-time emotion trajectory visualization.
 
@@ -43,38 +46,48 @@ streamlit run app.py
 Then open your browser and go to `http://localhost:8501`. Use the "Developer Controls" in the sidebar to toggle RAG functionality.
 
 
-To upload files to database:
+To upload files to the vector database:
 ```bash
-python "src/utils/RAG_upload/local_to_supabase.py" --source-dir "src/utils/RAG_upload/documents_for_RAG"
+python "src/static_knowledge/rag/local_to_supabase.py" --source-dir "src/static_knowledge/rag/documents_for_RAG"
 ```
 
 
 ---
 
-### How It Works
+### How It Works (The Cognitive Pipeline)
 
-1.  The user enters a message in the chat interface.
-2.  The system determines the user's current emotional state (`Sa`) (Arousal/Valence).
-3.  **Learning Step:** If this is not the first turn, the system calculates a `reward` based on how the last action affected the user's emotional state (i.e., did it move closer to the goal state `Sε`?). It uses this reward to update its internal **Q-table**.
-4.  **Planning Step:** The `PicoPlanner` queries the `QLearningManager`. IT calculates the optimal regulation action by evaluating each option against the user's current state (`Sa`), goal state (`Sε`), and personality profile (`t`), Using an epsilon-greedy strategy on the Q-table, the manager selects the optimal action for the current state.
-5.  The chosen action (e.g., "Distraction") is passed to the `ActionExecutor`.
-6.  The `ActionExecutor` optionally uses the `RAGAgent` to retrieve detailed information about the chosen action.
-7.  It then uses the `EmpatheticResponseAgent` to synthesize this information into a final, user-facing message.
-8.  The response is displayed to the user.
+The system enforces a strict "narrow bottleneck" data flow, conforming to the three-stage architecture proposed by Pico et al. (2024): Perception, Planning, and Execution.
+
+1.  **Phase 1: Recognition (Perception)**
+    *   The user enters a message. The `EmotionRecognitionModel` translates the raw text into a quantitative state ($S_a$) in the Arousal-Valence space.
+2.  **Phase 2: Dynamic Planning (Cognitive Core)**
+    *   *Evaluation (Appraisal):* The planner retrieves the previous state/action from the **Sensory Memory**. It calculates the Euclidean distance to the emotional equilibrium ($S_\epsilon$) to derive a `reward` (Pico, Eq. 1) and updates the Q-Table.
+    *   *Strategy (Action Selection):* Using an $\epsilon$-greedy policy, the planner selects the optimal regulation strategy based on the Q-Table and the user's OCEAN personality traits (Pico, Eq. 2, 3, 4).
+    *   *Tactics (Retrieval):* The planner queries the **Static Knowledge Base** (RAG) using *only* the strategy name to fetch a dry, step-by-step psychological intervention plan.
+3.  **Phase 3: Execution (Actuation)**
+    *   The `Executor` agent receives the tactical plan, the conversational history (**Episodic Memory**), and the raw user message. It fuses these elements via a single LLM call to generate a highly contextual, empathetic, and personalized therapeutic response.
 
 
 ---
 ### Project Structure
 
-The architecture is modular, separating the deterministic planner from the response generation logic.
+The project follows a "Screaming Architecture" paradigm, explicitly separating dynamic user knowledge, static psychological theory, and cognitive processing components.
 
 -   `src/`
-    -   `components/`: Core runtime components of the agent (`pico_planner`, `action_executor`, etc.).
-    -   `utils/`: Shared utility functions.
-        -   `RAG upload/`: Scripts for the offline data ingestion pipeline (`drive_to_supabase`, etc.).
-        -   `action_catalog.py`: Defines the regulation actions and their properties as per the paper.
--   `app.py`: The Streamlit web interface.
--   `main.py`: Contains the core `run_pico_pipeline` orchestration logic.
+    -   `dynamic_knowledge/` *(DB1: The Agent's Belief Base)*
+        -   `q_learning/q_table_manager.py`: Handles Q-Table CSV persistence.
+        -   `episodic_memory.py`: Tracks conversational history (semantic context).
+        -   `sensory_memory.py`: Tracks MDP tuples ($S_{t-1}, A_{t-1}$) for the RL Critic.
+    -   `static_knowledge/` *(DB2: The Domain Knowledge)*
+        -   `action_catalog.py`: Defines the 5 regulation strategies and their OCEAN correlation weights (Pico, Table 1).
+        -   `rag/`: Contains the pure-retrieval RAG engine and database upload scripts.
+    -   `components/` *(The Cognitive Flow)*
+        -   `emotion_recognition.py`: The perception module.
+        -   `planner.py`: The unified Q-Learning & heuristic decision core.
+        -   `executor.py`: The Natural Language Generation (NLG) actuator.
+    -   `system_orchestrator.py`: The Facade orchestrating the strict data pipeline.
+    -   `config.py`: Environment configurations.
+-   `app.py`: The lightweight Streamlit UI (completely decoupled from internal state logic).
 
 ---
 
@@ -82,16 +95,19 @@ The architecture is modular, separating the deterministic planner from the respo
 
 This project is under active development. The key areas for future work include:
 
--   **Persistence:** Save and load the agent's learned Q-table between sessions to create a truly personalized, long-term assistant.
 -   **Language Localization:** The final version of the agent is intended to operate entirely in **Polish**.
 -   **Open-Source Model Integration:**
-    -   **Emotion Classifier:** Replace the current LLM-based emotion recognition with a dedicated, open-source classifier model that maps text directly to Arousal-Valence values.
-    -   **Executor:** Transition from OpenAI models to open-source models for the response generation and RAG components. This includes exploring Polish-language models like `Bielik` or `PLLuM`.Test various approaches for the executor, including using a pre-trained model like "ChatCounselor" (Liu et al., 2023), fine-tuning a model on similar therapeutic conversation data...
-    -   **RAG and Vector Database:** Migrate from the current vector store solution to a fully open-source alternative like `Qdrant`. The data ingestion pipeline needs adaptation after changes. Tokenizing is also yet to be improved.
-    -   **Content Improvement:** Refine the `action_executor`'s internal plans, improve the static descriptions for RAG-less runs, and enhance the RAG knowledge base with more detailed documents on regulation techniques.
+    -   **Emotion Classifier:** Replace the current LLM-based emotion recognition with a dedicated, open-source classifier model that maps text directly to Arousal-Valence values to reduce latency and API costs.
+    -   **Executor:** Transition from OpenAI models to open-source models for the response generation component. This includes exploring Polish-language models like `Bielik` or `PLLuM`. Test various approaches for the executor, including using a pre-trained model like "ChatCounselor" (Liu et al., 2023) or fine-tuning a model on similar therapeutic conversation data.
+    -   **Vector Database Optimization:** Migrate from the current vector store solution to a fully open-source alternative like `Qdrant`. Tokenization and reranking strategies for the psychological RAG are yet to be improved.
+-   **Long-Term Semantic Memory:** Implement a module that summarizes episodic interactions after a session concludes, transferring core insights into a permanent user knowledge graph.
+- **RAG upload:** Debug and adjust file paths due to changes in the file structure.
+- **RAG literature:** Extend and extract just descriptions of emotion regulation techniques with step-by-step descriptions.
+- **Action description:** Add reasoning why the given action is adequate to the given state and user's life expiriences (based on long-term memory) (to boost UX) 
 
 ---
-
+### Last updated 
+*May 22, 2026*
 
 ### License
 

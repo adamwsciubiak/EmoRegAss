@@ -55,7 +55,6 @@ class DynamicPlanner:
         loaded_q = self.q_manager.load_q_table()
         
         if loaded_q is not None:
-            # Sprawdzamy, czy wczytana tablica pasuje do aktualnych parametrów siatki
             if loaded_q.shape == expected_shape:
                 self.q_table = loaded_q
                 self.is_calibrated = True
@@ -68,8 +67,6 @@ class DynamicPlanner:
             self.q_table = np.zeros(expected_shape)
             self.is_calibrated = False
             
-    # --- HELPER MATHEMATICAL FUNCTIONS ---
-    
     def _discretize_state(self, state: EmotionalState) -> int:
         arousal, valence = state
         arousal_norm = (arousal + 1) / 2
@@ -86,12 +83,7 @@ class DynamicPlanner:
         total_score = sum(weight * personality.get(trait, 0.5) for trait, weight in action.personality_weights.items())
         return total_score / N
 
-    # --- WARM START (INITIALIZATION) ---
-
     def calibrate(self, goal_state: EmotionalState, personality: PersonalityProfile) -> None:
-        """
-        Performs a 'warm start' of the Q-table based on mathematical heuristics.
-        """
         logger.info("Calibrating Dynamic Planner (Warm Start)...")
         for row in range(self.grid_size):
             for col in range(self.grid_size):
@@ -109,10 +101,7 @@ class DynamicPlanner:
                     )
                     distance_to_goal = self._calculate_distance(expected_next_state, goal_state)
                     
-                    # SCIENTIFIC FIX: Added + 1.0 to denominator to stabilize the scaling.
-                    # Without this, small distances blow up to infinity, ignoring pa_score.
                     effectiveness_score = 1.0 / (distance_to_goal + 1.0)
-                    
                     self.q_table[state_index, i] = effectiveness_score + pa_score
                     
         action_names = [a.name for a in self.action_catalog]
@@ -120,25 +109,18 @@ class DynamicPlanner:
         self.is_calibrated = True
         logger.info("Calibration complete. Q-Table saved.")
 
-    # --- CORE COGNITIVE CYCLE ---
-
     def evaluate(self, current_state: EmotionalState, goal_state: EmotionalState, sensory_memory: SensoryMemory) -> bool:
         """
         STEP 1: EVALUATION (Critic)
-        Calculates reward from the previous step, updates Q-Table, and decides if regulation is needed.
-        
-        Returns: True if user needs regulation (distance > threshold), False otherwise.
+        Calculates reward from the previous step, updates Q-Table, and logs the current Q-row.
         """
-        # 1. Update Learning (if we have a past state)
         prev_state, prev_action = sensory_memory.get_last_experience()
         
         if prev_state is not None and prev_action is not None:
-            # Reward: How much closer did we get to the goal?
             dist_before = self._calculate_distance(prev_state, goal_state)
             dist_now = self._calculate_distance(current_state, goal_state)
             reward = dist_before - dist_now
             
-            # Bellman Equation Update
             prev_state_idx = self._discretize_state(prev_state)
             curr_state_idx = self._discretize_state(current_state)
             action_idx = self.action_map[prev_action.name]
@@ -150,11 +132,15 @@ class DynamicPlanner:
             self.q_table[prev_state_idx, action_idx] = new_q
             logger.info(f"Evaluator updated Q-Table. Reward: {reward:.4f}")
             
-            # Persist learning
             action_names = [a.name for a in self.action_catalog]
             self.q_manager.save_q_table(self.q_table, action_names)
             
-        # 2. Check Appraisal Gap (Do we need to intervene?)
+        # Logowanie wartości Q-table dla nowo wykrytego stanu
+        current_state_idx = self._discretize_state(current_state)
+        current_q_row = self.q_table[current_state_idx, :]
+        q_row_log = " | ".join([f"{self.action_catalog[i].name}: {val:.3f}" for i, val in enumerate(current_q_row)])
+        logger.info(f"Q-Table row for state (A={current_state[0]:.2f}, V={current_state[1]:.2f}): [{q_row_log}]")
+            
         distance_to_goal = self._calculate_distance(current_state, goal_state)
         needs_regulation = distance_to_goal > self.tolerance_threshold
         logger.info(f"Appraisal Gap: {distance_to_goal:.4f} (Threshold: {self.tolerance_threshold}). Needs regulation: {needs_regulation}")
@@ -162,18 +148,12 @@ class DynamicPlanner:
         return needs_regulation
 
     def strategize(self, current_state: EmotionalState) -> RegulationAction:
-        """
-        STEP 2: STRATEGY (Actor)
-        Selects an abstract emotion regulation strategy using epsilon-greedy policy.
-        """
         state_idx = self._discretize_state(current_state)
 
         if np.random.uniform(0, 1) < self.epsilon:
-            # Explore
             action_idx = np.random.choice(self.num_actions)
             logger.debug("Strategy: Exploration (Random)")
         else:
-            # Exploit
             action_idx = np.argmax(self.q_table[state_idx, :])
             logger.debug("Strategy: Exploitation (Q-Table Max)")
 
@@ -182,17 +162,10 @@ class DynamicPlanner:
         return chosen_action
 
     def tactics(self, chosen_strategy: RegulationAction) -> Dict[str, Any]:
-        """
-        STEP 3: TACTICS
-        Converts the abstract strategy into a concrete step-by-step plan by querying DB2 (RAG).
-        Notice: User message is completely absent here!
-        """
         logger.info(f"Tactician requesting RAG manual for: {chosen_strategy.name}")
         
-        # Fetch knowledge from Static Knowledge Base
         retrieved_steps = self.rag_retriever.retrieve_technique_manual(chosen_strategy.name)
         
-        # Formulate a dry, strict plan for the Executor
         response_plan = {
             "goal": f"Introduce and guide the user through the '{chosen_strategy.name}' technique.",
             "technique_family": chosen_strategy.strategy_family,

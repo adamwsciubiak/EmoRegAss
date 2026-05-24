@@ -66,11 +66,14 @@ class RAGRetriever:
                 fallback_text = FALLBACK_MANUALS.get(strategy_name, FALLBACK_MANUALS["Default"])
                 return [fallback_text]
                 
+            # Logowanie odzyskanych snippetów z bazy danych (RAG Chunks) do pliku/terminala
+            snippets = "\n".join([f"Chunk {i+1}: {doc.page_content[:150]}..." for i, doc in enumerate(docs)])
+            logger.info(f"Successfully retrieved {len(docs)} chunks from database. Previews:\n{snippets}")
+                
             return [doc.page_content for doc in docs]
             
         except Exception as e:
             logger.error(f"Error during vector store retrieval: {e}", exc_info=True)
-            # Graceful Degradation: Record the error for UI transparency
             self.last_warning = f"Connection to the Vector Database failed while fetching '{strategy_name}'. A basic static manual was used instead."
             fallback_text = FALLBACK_MANUALS.get(strategy_name, FALLBACK_MANUALS["Default"])
             return [fallback_text]

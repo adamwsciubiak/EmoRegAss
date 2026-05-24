@@ -88,10 +88,10 @@ class Executor:
                 "chat_history_str": format_chat_history(recent_history)
             })
 
-            logger.debug(f"Response generated successfully: {response[:100]}...")
+            # NAPRAWA: Zmiana logger.debug na logger.info oraz zapis całego stringa do plików
+            logger.info(f"Response generated successfully:\n{response}")
             return response
             
         except Exception as e:
             logger.error(f"Error during response generation: {e}", exc_info=True)
-            # Zamiast zwracać fałszywą wiadomość, wypuszczamy błąd w górę do UI
             raise e

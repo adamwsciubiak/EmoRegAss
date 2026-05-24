@@ -92,6 +92,20 @@ class EmotionRegulationSystem:
         current_state = (emotion_analysis['arousal'], emotion_analysis['valence'])
         logger.info(f"Phase 1 Complete - Recognized State: {current_state}")
 
+        # ROZWIĄZANIE PROBLEMU 3: Logowanie wiersza Q-Table dla obecnego stanu
+        state_idx = self.planner._discretize_state(current_state)
+        q_row = self.planner.q_table[state_idx, :]
+        action_names = [a.name for a in self.planner.action_catalog]
+        q_row_str = " | ".join([f"{n}: {v:.4f}" for n, v in zip(action_names, q_row)])
+        logger.info(f"Q-Table row for detected state A:{current_state[0]:.2f}, V:{current_state[1]:.2f} (idx {state_idx}): [{q_row_str}]")
+
+        # ROZWIĄZANIE PROBLEMU 2 (Tłumaczenie UI): Logika informująca o (braku) aktualizacji tabeli Q
+        prev_s, prev_a = self.sensory_memory.get_last_experience()
+        if prev_s is None:
+            logger.info("First interaction detected. Q-Table will NOT be updated yet (no previous state to evaluate).")
+        else:
+            logger.info("Past experience found. Evaluator will calculate reward and update Q-Table.")
+
         # --- PHASE 2: PLANNING (Cognitive Core) ---
         needs_regulation = self.planner.evaluate(current_state, self.goal_state, self.sensory_memory)
         chosen_strategy = self.planner.strategize(current_state)

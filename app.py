@@ -108,6 +108,9 @@ def initialize_session_state() -> None:
     if "show_logs" not in st.session_state: st.session_state.show_logs = False
     if "system_error" not in st.session_state: st.session_state.system_error = None
     if "system_warnings" not in st.session_state: st.session_state.system_warnings = []
+    
+    # Dodanie dynamicznego klucza dla tabeli Q
+    if "q_table_key" not in st.session_state: st.session_state.q_table_key = 0
 
 def reset_chat() -> None:
     st.session_state.chat_history = []
@@ -120,7 +123,14 @@ def reset_chat() -> None:
     st.session_state.system_warnings = []
     st.session_state.system.episodic_memory.clear()
     st.session_state.system.sensory_memory.clear()
-    with open(log_file, "w", encoding="utf-8") as f: pass 
+    
+    for handler in logging.getLogger().handlers:
+        if isinstance(handler, logging.FileHandler):
+            handler.stream.seek(0)
+            handler.stream.truncate()
+            
+    # Wymuszenie odświeżenia Q-table po resecie
+    st.session_state.q_table_key += 1
 
 def use_suggested_prompt(prompt: str):
     st.session_state.user_message = prompt
@@ -147,7 +157,7 @@ def main():
         st.write("*won't be visible for study participants.*")
         st.title("Personality Profile")
         
-        chat_started = len(st.session_state.chat_history) > 0
+        chat_started = len(st.session_state.chat_history) > 0 or st.session_state.processing or st.session_state.user_message is not None
         if chat_started:
             st.info("Personality is locked during an active session. Reset chat to change traits.")
         
@@ -164,6 +174,7 @@ def main():
                 normalized = {k: (v - 1) / 9.0 for k, v in st.session_state.personality_traits.items()}
                 st.session_state.system.calibrate_system(normalized)
                 st.session_state.previous_personality = st.session_state.personality_traits.copy()
+            st.session_state.q_table_key += 1  # Wymuszenie odświeżenia tabeli po rekalibracji
             st.sidebar.success("Agent recalibrated!", icon="✅")
             time.sleep(1)
             st.rerun()
@@ -180,7 +191,6 @@ def main():
         
         st.button("Reset Chat", on_click=reset_chat, disabled=st.session_state.processing)
         
-        # FIX: Usunięto 'disabled=st.session_state.processing'. Toggle są dostępne w każdej chwili.
         st.toggle("Show Q-Table View", key="show_q_table")
         st.toggle("Show Application Logs", key="show_logs")
 
@@ -195,7 +205,12 @@ def main():
             st.markdown("### System Diagnostics")
             if st.session_state.show_q_table:
                 st.markdown("**Live Q-Table (Section 4.3)**")
-                st.dataframe(st.session_state.system.get_q_table_dataframe(), use_container_width=True)
+                # Zastosowanie deep copy oraz klucza wymuszającego przeładowanie elementu
+                st.dataframe(
+                    st.session_state.system.get_q_table_dataframe().copy(deep=True), 
+                    use_container_width=True,
+                    key=f"q_table_view_{st.session_state.q_table_key}"
+                )
             
             if st.session_state.show_logs:
                 st.markdown("**Cognitive Process Logs**")
@@ -214,7 +229,6 @@ def main():
             with st.chat_message(message["role"]):
                 st.markdown(message["content"])
                 
-        # Wyświetlanie ostrzeżeń z fallbacków nad błędem krytycznym
         if st.session_state.system_warnings:
             for warning in st.session_state.system_warnings:
                 st.warning(warning, icon="⚠️")
@@ -228,7 +242,6 @@ def main():
                     try:
                         normalized_pers = {k: (v - 1) / 9.0 for k, v in st.session_state.personality_traits.items()}
                         
-                        # Rozpakowanie 4 zmiennych, w tym listy ostrzeżeń z fallbacków
                         response, emotion_analysis, action, warnings = st.session_state.system.process_interaction(
                             user_message_to_process, 
                             normalized_pers
@@ -250,6 +263,8 @@ def main():
                         logger.error(f"Error during interaction processing: {e}\n{traceback.format_exc()}")
                         
             st.session_state.processing = False
+            # Zmiana klucza po przetworzeniu, by nowe Q-Table wyrysowało się natychmiast
+            st.session_state.q_table_key += 1
             st.rerun()
 
     def submit_chat():

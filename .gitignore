@@ -29,4 +29,7 @@ Thumbs.db
 
 .qodo/
 
+src/static_knowledge/rag/rag_upload/documents_for_rag_later/
+src/static_knowledge/rag/rag_upload/documents_for_RAG/
+
 tests/

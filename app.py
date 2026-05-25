@@ -58,7 +58,7 @@ if "logging_initialized" not in st.session_state:
 
 logger = logging.getLogger(__name__)
 
-def read_logs(max_lines: int = 100) -> str:
+def read_logs(max_lines: int = 200) -> str:
     try:
         for handler in logging.getLogger().handlers:
             if isinstance(handler, logging.FileHandler):
@@ -73,7 +73,10 @@ def initialize_session_state() -> None:
     if "system" not in st.session_state:
         with st.spinner("Initializing Cognitive Architecture..."):
             emotion_model = EmotionRecognitionModel()
-            q_manager = QTableManager()
+            
+            hidden_q_filepath = os.path.join("src", "dynamic_knowledge", "q_learning", ".q_table.csv")
+            q_manager = QTableManager(filepath=hidden_q_filepath)
+            
             vector_store = VectorStoreConnector().load_vector_store()
             rag_retriever = RAGRetriever(vector_store)
             
@@ -96,8 +99,13 @@ def initialize_session_state() -> None:
             )
 
     if "chat_history" not in st.session_state: st.session_state.chat_history = []
-    if "personality_traits" not in st.session_state: st.session_state.personality_traits = {"openness": 5, "conscientiousness": 5, "extraversion": 5, "agreeableness": 5, "neuroticism": 5}
-    if "previous_personality" not in st.session_state: st.session_state.previous_personality = None
+    
+    # Inicjalizacja domyślnych wartości dla suwaków w sposób bezpieczny dla stanu
+    if "o" not in st.session_state:
+        st.session_state.update({"o": 5, "c": 5, "e": 5, "a": 5, "n": 5})
+        
+    if "personality_traits" not in st.session_state: 
+        st.session_state.personality_traits = {"openness": 5, "conscientiousness": 5, "extraversion": 5, "agreeableness": 5, "neuroticism": 5}
     if "emotion_analysis" not in st.session_state: st.session_state.emotion_analysis = None
     if "valence_history" not in st.session_state: st.session_state.valence_history = []
     if "arousal_history" not in st.session_state: st.session_state.arousal_history = []
@@ -108,16 +116,28 @@ def initialize_session_state() -> None:
     if "show_logs" not in st.session_state: st.session_state.show_logs = False
     if "system_error" not in st.session_state: st.session_state.system_error = None
     if "system_warnings" not in st.session_state: st.session_state.system_warnings = []
-    
-    # Dodanie dynamicznego klucza dla tabeli Q
     if "q_table_key" not in st.session_state: st.session_state.q_table_key = 0
+
+# --- CALLBACK OSOBOWOŚCI (Wykonuje się w tle, bez zatrzymywania UI) ---
+def on_personality_change():
+    st.session_state.personality_traits = {
+        "openness": st.session_state.o,
+        "conscientiousness": st.session_state.c,
+        "extraversion": st.session_state.e,
+        "agreeableness": st.session_state.a,
+        "neuroticism": st.session_state.n
+    }
+    normalized = {k: (v - 1) / 9.0 for k, v in st.session_state.personality_traits.items()}
+    st.session_state.system.calibrate_system(normalized)
+    
+    # Inkrementacja klucza wymusza błyskawiczne odświeżenie samej tabeli Q bez migania!
+    st.session_state.q_table_key += 1
 
 def reset_chat() -> None:
     st.session_state.chat_history = []
     st.session_state.emotion_analysis = None
     st.session_state.valence_history = []
     st.session_state.arousal_history = []
-    st.session_state.previous_personality = None
     st.session_state.user_message = None
     st.session_state.system_error = None
     st.session_state.system_warnings = []
@@ -129,7 +149,6 @@ def reset_chat() -> None:
             handler.stream.seek(0)
             handler.stream.truncate()
             
-    # Wymuszenie odświeżenia Q-table po resecie
     st.session_state.q_table_key += 1
 
 def use_suggested_prompt(prompt: str):
@@ -138,6 +157,19 @@ def use_suggested_prompt(prompt: str):
 def main():
     st.set_page_config(page_title="Emotion Regulation Assistant", page_icon="😌", layout="wide")
     initialize_session_state()
+    
+    st.markdown(
+        """
+        <style>
+        div[data-testid="stChatInput"] {
+            position: fixed;
+            bottom: 2rem;
+            z-index: 99;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
     
     st.title("Emotion Regulation Assistant")
     st.subheader("Share how you're feeling, and the assistant will help you understand and manage emotions through personalized techniques tuned to your emotional state and personality.")
@@ -161,23 +193,12 @@ def main():
         if chat_started:
             st.info("Personality is locked during an active session. Reset chat to change traits.")
         
-        pre_change = st.session_state.personality_traits.copy()
-        
-        st.session_state.personality_traits["openness"] = st.slider("Openness to Experience", 1, 10, pre_change["openness"], key="o", disabled=chat_started)
-        st.session_state.personality_traits["conscientiousness"] = st.slider("Conscientiousness", 1, 10, pre_change["conscientiousness"], key="c", disabled=chat_started)
-        st.session_state.personality_traits["extraversion"] = st.slider("Extraversion", 1, 10, pre_change["extraversion"], key="e", disabled=chat_started)
-        st.session_state.personality_traits["agreeableness"] = st.slider("Agreeableness", 1, 10, pre_change["agreeableness"], key="a", disabled=chat_started)
-        st.session_state.personality_traits["neuroticism"] = st.slider("Neuroticism", 1, 10, pre_change["neuroticism"], key="n", disabled=chat_started)
-        
-        if st.session_state.personality_traits != st.session_state.previous_personality:
-            with st.spinner("Calibrating agent to new personality..."):
-                normalized = {k: (v - 1) / 9.0 for k, v in st.session_state.personality_traits.items()}
-                st.session_state.system.calibrate_system(normalized)
-                st.session_state.previous_personality = st.session_state.personality_traits.copy()
-            st.session_state.q_table_key += 1  # Wymuszenie odświeżenia tabeli po rekalibracji
-            st.sidebar.success("Agent recalibrated!", icon="✅")
-            time.sleep(1)
-            st.rerun()
+        # Suwaki używają natywnych kluczy z mechanizmem Callback - brak opóźnień i gubienia Toggle'i!
+        st.slider("Openness to Experience", 1, 10, key="o", disabled=chat_started, on_change=on_personality_change)
+        st.slider("Conscientiousness", 1, 10, key="c", disabled=chat_started, on_change=on_personality_change)
+        st.slider("Extraversion", 1, 10, key="e", disabled=chat_started, on_change=on_personality_change)
+        st.slider("Agreeableness", 1, 10, key="a", disabled=chat_started, on_change=on_personality_change)
+        st.slider("Neuroticism", 1, 10, key="n", disabled=chat_started, on_change=on_personality_change)
 
         if st.session_state.emotion_analysis:
             st.title("Emotional State")
@@ -205,7 +226,6 @@ def main():
             st.markdown("### System Diagnostics")
             if st.session_state.show_q_table:
                 st.markdown("**Live Q-Table (Section 4.3)**")
-                # Zastosowanie deep copy oraz klucza wymuszającego przeładowanie elementu
                 st.dataframe(
                     st.session_state.system.get_q_table_dataframe().copy(deep=True), 
                     use_container_width=True,
@@ -258,12 +278,11 @@ def main():
                         st.session_state.system_error = (
                             "An error occurred while processing your message. Please refresh the page. "
                             "If the error persists, please turn on 'Show Application Logs' in the sidebar, "
-                            "copy the logs, and email them to adawsc@st.amu.edu.pl."
+                            "copy the logs, and email them to wsciubiaka@gmail.com."
                         )
                         logger.error(f"Error during interaction processing: {e}\n{traceback.format_exc()}")
                         
             st.session_state.processing = False
-            # Zmiana klucza po przetworzeniu, by nowe Q-Table wyrysowało się natychmiast
             st.session_state.q_table_key += 1
             st.rerun()
 

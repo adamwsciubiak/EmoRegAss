@@ -16,6 +16,7 @@ import os
 import time
 import logging
 import traceback
+import tempfile
 from dotenv import load_dotenv
 
 from src.system_orchestrator import EmotionRegulationSystem
@@ -74,9 +75,10 @@ def initialize_session_state() -> None:
         with st.spinner("Initializing Cognitive Architecture..."):
             emotion_model = EmotionRecognitionModel()
             
-            # FIX: Przekazujemy ścieżkę z ukrytym plikiem (.q_table.csv), co całkowicie 
-            # deaktywuje systemowy Watchdog Streamlita i zapobiega ubijaniu interfejsu.
-            hidden_q_filepath = os.path.join("src", "dynamic_knowledge", "q_learning", ".q_table.csv")
+            # FIX: Zapisujemy plik Q-Tabeli w systemowym folderze tymczasowym.
+            # Całkowicie omija to detekcję zmian plików Streamlit Cloud (Watchdoga)
+            # eliminując zabijanie głównego wątku i crashe typu KeyError podczas generowania odpowiedzi.
+            hidden_q_filepath = os.path.join(tempfile.gettempdir(), "emoreg_q_table.csv")
             q_manager = QTableManager(filepath=hidden_q_filepath)
             
             vector_store = VectorStoreConnector().load_vector_store()
@@ -147,8 +149,6 @@ def main():
     
     if st.session_state.user_message and not st.session_state.processing:
         st.session_state.chat_history.append({"role": "user", "content": st.session_state.user_message})
-        # Wymuszenie re-asignacji w sesji, by uniknąć problemu braku odświeżenia przez st.rerun() na cloud
-        st.session_state.chat_history = st.session_state.chat_history
         st.session_state.processing = True
         st.session_state.system_error = None 
         st.session_state.system_warnings = []
@@ -188,17 +188,6 @@ def main():
         
         st.toggle("Show Q-Table View", key="show_q_table")
         st.toggle("Show Application Logs", key="show_logs")
-        
-        # Przeniesione na koniec sidebar'a, aby zapobiec czyszczeniu wyżej pokazanych kontrolek przez st.rerun()
-        if st.session_state.personality_traits != st.session_state.previous_personality:
-            with st.spinner("Calibrating agent to new personality..."):
-                normalized = {k: (v - 1) / 9.0 for k, v in st.session_state.personality_traits.items()}
-                st.session_state.system.calibrate_system(normalized)
-                st.session_state.previous_personality = st.session_state.personality_traits.copy()
-            st.session_state.q_table_key += 1  
-            st.sidebar.success("Agent recalibrated!", icon="✅")
-            time.sleep(1)
-            st.rerun()
 
     show_right_panel = st.session_state.show_q_table or st.session_state.show_logs
     if show_right_panel:
@@ -211,9 +200,10 @@ def main():
             st.markdown("### System Diagnostics")
             if st.session_state.show_q_table:
                 st.markdown("**Live Q-Table (Section 4.3)**")
+                # Zastąpiono deprecjonowane `use_container_width=True` na rzecz zalecanego `width='stretch'`
                 st.dataframe(
                     st.session_state.system.get_q_table_dataframe().copy(deep=True), 
-                    use_container_width=True,
+                    width='stretch',
                     key=f"q_table_view_{st.session_state.q_table_key}"
                 )
             
@@ -226,7 +216,8 @@ def main():
             st.markdown("""*Please note that it's a prototype and although it has access to some mental health related publications, it's yet to be polished (pun intended).* **Do NOT share any sensitive information.**\n\nYou can type any message or try one of these prompts to get started:""")
             cols = st.columns(2)
             for i, prompt in enumerate(SUGGESTED_PROMPTS):
-                if cols[i % 2].button(prompt, key=f"prompt_{i}", use_container_width=True, disabled=st.session_state.processing):
+                # Zastąpiono deprecjonowane `use_container_width=True` na rzecz zalecanego `width='stretch'`
+                if cols[i % 2].button(prompt, key=f"prompt_{i}", width='stretch', disabled=st.session_state.processing):
                     use_suggested_prompt(prompt)
                     st.rerun()
         
@@ -253,18 +244,10 @@ def main():
                         )
                         
                         st.markdown(response)
-                        
                         st.session_state.chat_history.append({"role": "assistant", "content": response})
-                        st.session_state.chat_history = st.session_state.chat_history
-                        
                         st.session_state.emotion_analysis = emotion_analysis
-                        
                         st.session_state.valence_history.append(emotion_analysis.get("valence", 0))
-                        st.session_state.valence_history = st.session_state.valence_history
-                        
                         st.session_state.arousal_history.append(emotion_analysis.get("arousal", 0))
-                        st.session_state.arousal_history = st.session_state.arousal_history
-                        
                         st.session_state.system_warnings = warnings
                         
                     except Exception as e:
@@ -288,6 +271,22 @@ def main():
                   key="chat_widget_input", 
                   on_submit=submit_chat, 
                   disabled=st.session_state.processing)
+
+    # FIX: Logika st.rerun() musi odbywać się NA SAMYM KOŃCU kodu (po wygenerowaniu interfejsu).
+    # Przeciwdziała to mechanizmowi "Streamlit Widget Cleanup", który potrafił
+    # usuwać ukryte w sidebarze przyciski Toggles, co powodowało zamykanie się prawego panelu.
+    if st.session_state.personality_traits != st.session_state.previous_personality:
+        if st.session_state.previous_personality is not None:
+            with st.spinner("Calibrating agent to new personality..."):
+                normalized = {k: (v - 1) / 9.0 for k, v in st.session_state.personality_traits.items()}
+                st.session_state.system.calibrate_system(normalized)
+                st.session_state.previous_personality = st.session_state.personality_traits.copy()
+            st.session_state.q_table_key += 1  
+            st.sidebar.success("Agent recalibrated!", icon="✅")
+            time.sleep(1)
+            st.rerun()
+        else:
+            st.session_state.previous_personality = st.session_state.personality_traits.copy()
 
 if __name__ == "__main__":
     main()

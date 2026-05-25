@@ -147,6 +147,8 @@ def main():
     
     if st.session_state.user_message and not st.session_state.processing:
         st.session_state.chat_history.append({"role": "user", "content": st.session_state.user_message})
+        # Wymuszenie re-asignacji w sesji, by uniknąć problemu braku odświeżenia przez st.rerun() na cloud
+        st.session_state.chat_history = st.session_state.chat_history
         st.session_state.processing = True
         st.session_state.system_error = None 
         st.session_state.system_warnings = []
@@ -171,16 +173,6 @@ def main():
         st.session_state.personality_traits["extraversion"] = st.slider("Extraversion", 1, 10, pre_change["extraversion"], key="e", disabled=chat_started)
         st.session_state.personality_traits["agreeableness"] = st.slider("Agreeableness", 1, 10, pre_change["agreeableness"], key="a", disabled=chat_started)
         st.session_state.personality_traits["neuroticism"] = st.slider("Neuroticism", 1, 10, pre_change["neuroticism"], key="n", disabled=chat_started)
-        
-        if st.session_state.personality_traits != st.session_state.previous_personality:
-            with st.spinner("Calibrating agent to new personality..."):
-                normalized = {k: (v - 1) / 9.0 for k, v in st.session_state.personality_traits.items()}
-                st.session_state.system.calibrate_system(normalized)
-                st.session_state.previous_personality = st.session_state.personality_traits.copy()
-            st.session_state.q_table_key += 1  
-            st.sidebar.success("Agent recalibrated!", icon="✅")
-            time.sleep(1)
-            st.rerun()
 
         if st.session_state.emotion_analysis:
             st.title("Emotional State")
@@ -196,6 +188,17 @@ def main():
         
         st.toggle("Show Q-Table View", key="show_q_table")
         st.toggle("Show Application Logs", key="show_logs")
+        
+        # Przeniesione na koniec sidebar'a, aby zapobiec czyszczeniu wyżej pokazanych kontrolek przez st.rerun()
+        if st.session_state.personality_traits != st.session_state.previous_personality:
+            with st.spinner("Calibrating agent to new personality..."):
+                normalized = {k: (v - 1) / 9.0 for k, v in st.session_state.personality_traits.items()}
+                st.session_state.system.calibrate_system(normalized)
+                st.session_state.previous_personality = st.session_state.personality_traits.copy()
+            st.session_state.q_table_key += 1  
+            st.sidebar.success("Agent recalibrated!", icon="✅")
+            time.sleep(1)
+            st.rerun()
 
     show_right_panel = st.session_state.show_q_table or st.session_state.show_logs
     if show_right_panel:
@@ -250,10 +253,18 @@ def main():
                         )
                         
                         st.markdown(response)
+                        
                         st.session_state.chat_history.append({"role": "assistant", "content": response})
+                        st.session_state.chat_history = st.session_state.chat_history
+                        
                         st.session_state.emotion_analysis = emotion_analysis
+                        
                         st.session_state.valence_history.append(emotion_analysis.get("valence", 0))
+                        st.session_state.valence_history = st.session_state.valence_history
+                        
                         st.session_state.arousal_history.append(emotion_analysis.get("arousal", 0))
+                        st.session_state.arousal_history = st.session_state.arousal_history
+                        
                         st.session_state.system_warnings = warnings
                         
                     except Exception as e:
